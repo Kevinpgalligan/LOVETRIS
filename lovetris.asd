@@ -6,7 +6,7 @@
 (defsystem lovetris
   :license "MIT"
   :author "Kevin Galligan"
-  :depends-on ()
+  :depends-on (:alexandria)
   :pathname "src"
   :serial t
   :components ((:file "package")
