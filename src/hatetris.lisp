@@ -133,15 +133,3 @@
       ".###"
       "..#."
       "...."))))
-;; things to do:
-;;      1.2. algorithm to find valid positions (don't copy whole
-;;           grid yet, have some sort of "intermediate" copy that's
-;;           just a pair of the well and the piece position... maybe.
-;;           Think about what will be useful later on).
-;;   2. Hatetris AI: looks at all possible moves for all possible
-;;      pieces, picks the piece with the max minimum height? Tie breaks
-;;      solved by order of pieces. Need to read the code.
-;;   3. Some sort of interface for testing it and playing with it.
-;;   4. Greedy search (algorithm and heuristics).
-;;   5. Rework genetic algo code to find best heuristic weights.
-;;   6. Implement Monte Carlo Tree Search.
