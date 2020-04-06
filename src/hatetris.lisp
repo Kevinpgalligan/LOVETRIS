@@ -1,3 +1,7 @@
+;;;; This contains everything to do with the base game.
+;;;; Game state, pieces, piece moves, generating valid
+;;;; next states given a piece, and so on.
+
 (in-package lovetris)
 
 (defconstant +empty+ 0)
@@ -57,6 +61,14 @@
 
 (defun well-height (state)
   (array-dimension (state-well state) 0))
+
+(defun tower-height (state)
+  (loop for y from (1- (well-height state)) downto 0
+        while (not (row-empty-p state y))
+        finally (return 
+                  (- (well-height state)
+                     y
+                     1))))
 
 (defun merge-piece (state piece)
   (let ((new-well (alexandria:copy-array (state-well state))))
