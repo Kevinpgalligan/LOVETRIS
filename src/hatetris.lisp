@@ -10,7 +10,14 @@
 (defconstant +bbox-size+ 4)
 (defconstant +n-orientations+ 4)
 
-(defstruct state well score bar game-over)
+(defstruct state well score bar game-over last-piece)
+
+(defun deep-copy-state (state)
+  (make-state :well (alexandria:copy-array (state-well state))
+              :score (state-score state)
+              :bar (state-bar state)
+              :game-over (state-game-over state)
+              :last-piece (state-last-piece state)))
 
 ;; A piece has a 4x4 bounding box.
 ;; We track the x,y coordinates of the upper
@@ -51,10 +58,14 @@
   (make-state :well (make-array (list height width) :initial-element +empty+)
               :score 0
               :bar bar
-              :game-over nil))
+              :game-over nil
+              :last-piece nil))
 
 (defun get-square (state x y)
   (aref (state-well state) y x))
+
+(defun set-square! (state x y new-square)
+  (setf (aref (state-well state) y x) new-square))
 
 (defun well-width (state)
   (array-dimension (state-well state) 1))
@@ -71,32 +82,40 @@
                      1))))
 
 (defun merge-piece (state piece)
-  (let ((new-well (alexandria:copy-array (state-well state))))
+  ;; Override the name of 'state' to avoid confusion, don't
+  ;; want the copy & the original in the same namespace.
+  (let ((state (deep-copy-state state)))
+    (setf (slot-value state 'last-piece) piece)
     (loop for (x y) in (piece-absolute-coords piece) do
-          (setf (aref new-well y x) +full+))
-    (let* ((filled-rows
-             (loop for y from 0 below (well-height state)
-                   when (row-full-p state y)
-                   sum 1))
-           (new-score (+ filled-rows (state-score state)))
-           (tower-above-bar
-             (not (row-empty-p state (1- (state-bar state))))))
-      ;; Clear full rows and move down the tower.
-      (loop for y from 0 below (well-height state) do
-            (when (row-full-p state y)
-              (loop for x from 0 below (well-width state) do
-                    (setf (aref new-well y x) +empty+))
-              (loop for y-above from (1- y) downto 0 do
-                    ;; Wasteful here, even scanning empty rows.
-                    ;; Also wasteful in other parts of this function.
-                    (loop for x from 0 below (well-width state) do
-                          (when (equalp +full+ (aref new-well y-above x))
-                            (setf (aref new-well y-above x) +empty+)
-                            (setf (aref new-well (1+ y-above) x) +full+))))))
-      (make-state :well new-well
-                  :score new-score
-                  :bar (state-bar state)
-                  :game-over tower-above-bar))))
+          (set-square! state x y +full+))
+    ;; Don't clear filled rows if the tower is above
+    ;; the bar, as per the original HATETRIS.
+    (if (tower-above-bar state)
+        (setf (slot-value state 'game-over) t)
+        (clear-filled-rows! state))
+    state))
+
+(defun tower-above-bar (state)
+  (not (row-empty-p state (1- (state-bar state)))))
+
+(defun clear-filled-rows! (state)
+  (let* ((filled-rows
+           (loop for y from 0 below (well-height state)
+                 when (row-full-p state y)
+                 sum 1))
+         (new-score (+ filled-rows (state-score state))))
+    (setf (slot-value state 'score) new-score)
+    ;; Clear full rows and move down the tower.
+    (loop for y from 0 below (well-height state) do
+          (when (row-full-p state y)
+            (loop for x from 0 below (well-width state) do
+                  (set-square! state x y +empty+))
+            (loop for y-above from (1- y) downto 0 do
+                  (loop for x from 0 below (well-width state) do
+                        (when (equalp +full+ (get-square state x y-above))
+                          ;; Move the square down.
+                          (set-square! state x y-above +empty+)
+                          (set-square! state x (1+ y-above) +full+))))))))
 
 (defun row-full-p (state y)
   (row-does-not-contain +empty+ state y))
@@ -116,10 +135,6 @@
   ;; Keep track of piece positions / orientations we've
   ;; seen before.
   (let ((seen (make-hash-table :test #'equal)))
-    (defun seen-p (piece)
-      (gethash (piece-key piece) seen))
-    (defun add-to-seen (piece)
-      (setf (gethash (piece-key piece) seen) t))
     ;; Now do a depth first search to find valid piece positions
     ;; using the left, right, down & rotate movements. Have to keep
     ;; track of positions we've seen before, otherwise we'd end up
@@ -132,9 +147,9 @@
                 (push piece locked-positions))
               (loop for move in *piece-moves* do
                     (let ((next-position (funcall move piece)))
-                      (when (and (not (seen-p next-position))
+                      (when (and (not (seen-p seen next-position))
                                  (valid-position-p state next-position))
-                        (add-to-seen next-position)
+                        (add-to-seen seen next-position)
                         (push next-position positions))))))
       (mapcar (lambda (piece) (merge-piece state piece))
               ;; Some of the positions are duplicates, it's just
@@ -143,16 +158,13 @@
               ;; translated orientation.
               (remove-duplicate-positions locked-positions)))))
 
+(defun seen-p (seen piece)
+  (gethash (piece-key piece) seen))
+
+(defun add-to-seen (seen piece)
+  (setf (gethash (piece-key piece) seen) t))
+
 (defun remove-duplicate-positions (positions)
-  (defun are-duplicates (p1 p2)
-    ;; Consider the positions to be equal
-    ;; if they have all the same absolute
-    ;; coordinates (not necessarily in the
-    ;; same order).
-    (let ((p2-absolute-coords (piece-absolute-coords p2)))
-      (every (lambda (x-y-pair)
-               (find x-y-pair p2-absolute-coords :test #'equalp))
-             (piece-absolute-coords p1))))
   ;; May be inefficient to use a list here, it can be
   ;; optimised if necessary. There shouldn't be more than 10s
   ;; of positions, anyway.
@@ -161,6 +173,16 @@
           (setf uniques
                 (adjoin position uniques :test #'are-duplicates)))
     uniques))
+
+(defun are-duplicates (p1 p2)
+  ;; Consider the positions to be equal
+  ;; if they have all the same absolute
+  ;; coordinates (not necessarily in the
+  ;; same order).
+  (let ((p2-absolute-coords (piece-absolute-coords p2)))
+    (every (lambda (x-y-pair)
+             (find x-y-pair p2-absolute-coords :test #'equalp))
+           (piece-absolute-coords p1))))
 
 (defun valid-position-p (state piece)
   (not (loop for (x y) in (piece-absolute-coords piece)

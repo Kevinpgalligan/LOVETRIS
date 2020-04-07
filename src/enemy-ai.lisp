@@ -20,14 +20,7 @@
 (defun score-piece (state piece)
   ;; Score based on min tower height achievable. We can then pick the
   ;; worst piece by maximising the minimum tower height.
-  ;; Also need a hack... if the game is over, add to the height. That's
-  ;; because game over is evaluated before filled rows are removed in the
-  ;; original HATETRIS. Not sure if it even makes a difference.
   (apply
    #'min
-   (mapcar (lambda (new-state)
-             (let ((height (tower-height new-state)))
-               (if (state-game-over new-state)
-                   (+ 100 height)
-                   height)))
+   (mapcar #'tower-height
            (get-placements state piece))))
