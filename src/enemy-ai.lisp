@@ -1,5 +1,5 @@
-;;;; Contains the "enemy AI" that's responsible for providing
-;;;; the worst possible piece for the next move.
+;;;; "Enemy" AI that's responsible for providing
+;;;; the piece for the next move.
 
 (in-package lovetris)
 
@@ -7,7 +7,7 @@
   ;; Important: if 2 pieces have the same score, this will
   ;; return the one that appears first. Necessary to mimic
   ;; the original HATETRIS.
-  (first-max +pieces+
+  (first-max *pieces*
              (lambda (piece)
                (score-piece state piece))))
 

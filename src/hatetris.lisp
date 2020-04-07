@@ -1,4 +1,4 @@
-;;;; This contains everything to do with the base game.
+;;;; The base game.
 ;;;; Game state, pieces, piece moves, generating valid
 ;;;; next states given a piece, and so on.
 
@@ -203,11 +203,11 @@
         (list (+ x (piece-x piece))
               (+ y (piece-y piece)))))
 
-(defparameter piece-orientations
+(defparameter *piece-orientations*
   (make-hash-table :test #'equal))
 
 (defun get-orientations (piece-id)
-  (gethash piece-id piece-orientations))
+  (gethash piece-id *piece-orientations*))
 
 (defun next-orientation (piece-id orientation)
   (let* ((orientations (get-orientations piece-id))
@@ -228,8 +228,8 @@
         (list x y)
         (rotate-coords (1- n) (- +bbox-size+ y 1) x)))
   (let ((coords (parse-piece-template template))
-        (piece-id (hash-table-count piece-orientations)))
-    (setf (gethash piece-id piece-orientations)
+        (piece-id (hash-table-count *piece-orientations*)))
+    (setf (gethash piece-id *piece-orientations*)
           ;; I considered removing translations here, but it's
           ;; possible that the only way to manoeuvre into a
           ;; position is by going through one of the redundant
@@ -260,7 +260,7 @@
 
 ;; Order is important, as described in
 ;; the original HATETRIS code.
-(defparameter +pieces+
+(defparameter *pieces*
   (mapcar
    #'generate-piece
    ;; Templates.
