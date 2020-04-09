@@ -7,9 +7,29 @@
     (nth (random (length options))
          options)))
 
-;;;; Returns a heuristic function with the given
-;;;; weights on different characteristics of the
-;;;; game.
+;;; Look 1 move ahead and pick the next state
+;;; that maximises heuristics.
+(defun place-greedily (heuristic-evaluator)
+  (lambda (state piece)
+    (let* ((state-score-pairs
+             (mapcar (lambda (next-state)
+                       (cons next-state
+                             (funcall heuristic-evaluator
+                                      next-state)))
+                     (get-placements state piece)))
+           (best-score (apply #'max (mapcar #'cdr state-score-pairs)))
+           (best-states
+             (remove-if-not (lambda (pair)
+                              (= best-score (cdr pair)))
+                            state-score-pairs)))
+      ;; If multiple states have the best score, pick one
+      ;; at random.
+      (car (nth (random (length best-states))
+                best-states)))))
+
+;;; Returns a heuristic function with the given
+;;; weights on different characteristics of the
+;;; game.
 (defun heuristic-evaluator (w-aggregate-height w-score w-holes w-bumpiness)
   (lambda (state)
     (+ (* w-aggregate-height (aggregate-height state))
