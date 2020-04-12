@@ -59,18 +59,44 @@
                        :fill-paint *red*)))
 
 (defmethod gamekit:post-initialize ((app hatetris))
-  (gamekit:bind-button :left :pressed
-                       (lambda ()
-                         (update-piece #'piece-left)))
-  (gamekit:bind-button :right :pressed
-                       (lambda ()
-                         (update-piece #'piece-right)))
-  (gamekit:bind-button :up :pressed
+  ;; Yes, I'm aware that this is some horrible duplication, but
+  ;; it wouldn't work when I put the button / function pairs
+  ;; in a list and looped through them. For some reason, all of
+  ;; the buttons were bound to the last function in the list.
+  ;; Maybe the lambda in the loop was being overwritten? Anyway,
+  ;; I'm too frustrated to spend any more time on it.
+  (gamekit:bind-button :up
+                       :pressed
                        (lambda ()
                          (update-piece #'piece-rotate)))
-  (gamekit:bind-button :down :pressed
+  (gamekit:bind-button :up
+                       :repeating
                        (lambda ()
-                         (update-piece #'piece-down))))
+                         (update-piece #'piece-rotate)))
+  (gamekit:bind-button :down
+                       :pressed
+                       (lambda ()
+                         (update-piece #'piece-down)))
+  (gamekit:bind-button :down
+                       :repeating
+                       (lambda ()
+                         (update-piece #'piece-down)))
+  (gamekit:bind-button :left
+                       :pressed
+                       (lambda ()
+                         (update-piece #'piece-left)))
+  (gamekit:bind-button :left
+                       :repeating
+                       (lambda ()
+                         (update-piece #'piece-left)))
+  (gamekit:bind-button :right
+                       :pressed
+                       (lambda ()
+                         (update-piece #'piece-right)))
+  (gamekit:bind-button :right
+                       :repeating
+                       (lambda ()
+                         (update-piece #'piece-right))))
 
 (defun update-piece (piece-move)
   (when *piece*
@@ -81,10 +107,16 @@
           (setf *piece*
                 (if (state-game-over *state*)
                     nil
-                    (get-worst-piece *state*))))
+                    (get-worst-piece-in-middle *state*))))
         (let ((new-piece (funcall piece-move *piece*)))
           (when (valid-position-p *state* new-piece)
             (setf *piece* new-piece))))))
+
+(defun get-worst-piece-in-middle (state)
+  (let ((next-piece (get-worst-piece state)))
+    (setf (slot-value next-piece 'x)
+          (+ 3 (piece-x next-piece)))
+    next-piece))
 
 (defun draw-square (x y colour)
   (gamekit:draw-rect (gamekit:vec2 (+ +border-pixels+
@@ -101,5 +133,5 @@
   (setf *state* (new-state :width +width+
                            :height +height+
                            :bar +bar+))
-  (setf *piece* (get-worst-piece *state*))
+  (setf *piece* (get-worst-piece-in-middle *state*))
   (gamekit:start 'hatetris))

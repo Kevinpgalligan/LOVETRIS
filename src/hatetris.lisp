@@ -10,14 +10,43 @@
 (defconstant +bbox-size+ 4)
 (defconstant +n-orientations+ 4)
 
-(defstruct state well score bar game-over last-piece)
+;; Should really make this a class and
+;; hide the internals. Oh well.
+(defstruct state well score bar game-over)
+
+(defun state-hash (state)
+  (+ (* 2 (well-hash state))
+     (* 3 (state-score state))
+     (* 5 (state-bar state))
+     (* 7 (if (state-game-over state) 1 0))))
+
+(defparameter *primes*
+  (list 2 3 5 7 11 13 17 19 23 29 31 37 41 43
+        47 53 59 61 67 71 73 79 83 89 97 101 103
+        107 109 113 127 131 137 139 149 151 157
+        163 167 173 179 181 191 193 197 199))
+
+(defun well-hash (state)
+  ;; Treat rows as binary numbers. Multiply
+  ;; them by primes. And sum them.
+  ;; THIS WON'T BE ABLE TO PROCESS ALL OF THE ROWS IF
+  ;; THERE ARE MORE ROWS THAN THE NUMBER OF PRIMES
+  ;; IN *primes*. I've tried to add enough primes for
+  ;; any occasion, but you never know.
+  (mod (loop for y from (state-bar state) below (well-height state)
+             for prime in *primes*
+             sum (* prime
+                    (loop for x from 0 below (well-width state)
+                          sum (if (equalp +empty+ (get-square state x y))
+                                  0
+                                  (expt 2 x)))))
+       (expt 10 20)))
 
 (defun deep-copy-state (state)
   (make-state :well (alexandria:copy-array (state-well state))
               :score (state-score state)
               :bar (state-bar state)
-              :game-over (state-game-over state)
-              :last-piece (state-last-piece state)))
+              :game-over (state-game-over state)))
 
 ;; A piece has a 4x4 bounding box.
 ;; We track the x,y coordinates of the upper
@@ -58,8 +87,7 @@
   (make-state :well (make-array (list height width) :initial-element +empty+)
               :score 0
               :bar bar
-              :game-over nil
-              :last-piece nil))
+              :game-over nil))
 
 (defun get-square (state x y)
   (aref (state-well state) y x))
@@ -85,7 +113,6 @@
   ;; Override the name of 'state' to avoid confusion, don't
   ;; want the copy & the original in the same namespace.
   (let ((state (deep-copy-state state)))
-    (setf (slot-value state 'last-piece) piece)
     (loop for (x y) in (piece-absolute-coords piece) do
           (set-square! state x y +full+))
     ;; Don't clear filled rows if the tower is above
@@ -219,7 +246,7 @@
          (row-empty-p state y-below-bbox))))
 
 ;; Normally, coordinates are relative to the position
-;; of the bounding box.
+;; of the bounding box. This returns the absolute version.
 (defun piece-absolute-coords (piece)
   (loop for (x y) in (piece-coords piece) collect
         (list (+ x (piece-x piece))
@@ -279,6 +306,10 @@
                  (loop for x from 0 below +bbox-size+
                        when (equal #\# (char row x))
                        collect (list x y))))))
+
+(defun get-pieces ()
+  (mapcar #'copy-structure
+          *pieces*))
 
 ;; Order is important, as described in
 ;; the original HATETRIS code.

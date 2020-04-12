@@ -27,6 +27,75 @@
       (car (nth (random (length best-states))
                 best-states)))))
 
+#|
+(defclass beam-searcher ()
+  ((beam-width
+    :initarg :beam-width
+    :initform 2
+    :documentation "How many states to explore at each depth of the search tree.")
+   (search-depth
+    :initarg :search-depth
+    :initform 16
+    :accessor search-depth
+    :documentation "How deep to search in the tree before picking a move.")
+   (search-tree
+    :initarg :search-tree
+    :initform nil)))
+
+(defgeneric init-search-tree (tree-searcher start-state))
+
+(defmethod init-search-tree ((tree-searcher beam-searcher) start-state)
+  (setf (slot-value beam-searcher 'search-tree)
+        (make-node start-state)))
+
+(defclass node ()
+  ((state
+    :initform (error "Must provide state for node.")
+    :reader state)
+   (heuristic-value
+    :initarg :heuristic-value
+    :reader heuristic-value)
+   (children
+    :initform nil
+    :accessor children)))
+
+(defun make-node (state)
+  (make-instance 'node
+                 :state state))
+
+(defun expanded-p (node)
+  (children node))
+
+(defgeneric advance (tree-searcher)
+  (:documentation "Get tree searcher to advance and return the next state."))
+
+(defmethod advance ((searcher beam-searcher))
+  (expand-nodes
+   (search-tree searcher)
+   (search-width searcher)
+   (search-depth searcher))
+  (let ((next-node (best-node (children (search-tree searcher)))))
+    (setf (search-tree searcher) next-node)
+    (state next-node)))
+
+;; TODO implement this.
+;; Needs heuristic evaluator.
+;; If at the bottom... set heuristic
+;; value of this node to its own value. And return that.
+;; If it hasn't been expanded, add child nodes.
+;; Then set its heuristic value to the max of the heuristic
+;; values of its children. Oh shit, wait. Gotta rank the
+;; children by their heuristic values and only pick the highest
+;; ones ('width' of them).
+(defun expand-nodes (current-node width remaining-depth)
+  (cond ((= 0 remaining-depth)
+         (setf (heuristic-value)))))
+
+(defun best-node (nodes)
+  (alexandria:extremum nodes #'> :key #'heuristic-value))
+
+|#
+
 ;;; Returns a heuristic function with the given
 ;;; weights on different characteristics of the
 ;;; game.

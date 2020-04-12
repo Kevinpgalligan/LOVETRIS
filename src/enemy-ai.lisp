@@ -7,7 +7,7 @@
   ;; Important: if 2 pieces have the same score, this will
   ;; return the one that appears first. Necessary to mimic
   ;; the original HATETRIS.
-  (first-max *pieces*
+  (first-max (get-pieces)
              (lambda (piece)
                (score-piece state piece))))
 
