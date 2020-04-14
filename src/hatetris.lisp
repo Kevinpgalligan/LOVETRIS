@@ -10,14 +10,19 @@
 (defconstant +bbox-size+ 4)
 (defconstant +n-orientations+ 4)
 
+(defconstant +well-width+ 10)
+(defconstant +well-height+ 20)
+(defconstant +bar+ 4)
+
 ;; Should really make this a class and
 ;; hide the internals. Oh well.
 (defstruct state well score bar game-over)
 
-(defun new-state (&key (width 10) (height 20) (bar 4))
-  (make-state :well (make-array (list height width) :initial-element +empty+)
+(defun new-state ()
+  (make-state :well (make-array (list +well-height+ +well-width+)
+                                :initial-element +empty+)
               :score 0
-              :bar bar
+              :bar +bar+
               :game-over nil))
 
 (defun get-square (state x y)
@@ -318,7 +323,7 @@
                 (loop for (x y) in coords collect
                       (rotate-coords num-rotations x y))))
     (make-piece
-     :x 0
+     :x (/ (- +well-width+ +bbox-size+) 2)
      :y 0
      :id piece-id
      :coords coords
@@ -333,10 +338,6 @@
                  (loop for x from 0 below +bbox-size+
                        when (equal #\# (char row x))
                        collect (list x y))))))
-
-(defun get-pieces ()
-  (mapcar #'copy-structure
-          *pieces*))
 
 ;; Order is important, as described in
 ;; the original HATETRIS code.
@@ -373,3 +374,7 @@
       ".###"
       "..#."
       "...."))))
+
+(defun get-pieces ()
+  (mapcar #'copy-structure
+          *pieces*))

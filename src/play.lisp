@@ -2,20 +2,16 @@
 
 (in-package lovetris)
 
-(defconstant +width+ 10)
-(defconstant +height+ 20)
-(defconstant +bar+ 4)
-
 (defconstant +border-pixels+ 10)
 (defconstant +square-size+ 25)
 (defconstant +pixels-for-score+ 50)
 
 (defconstant +window-width+
   (+ (* 2 +border-pixels+)
-     (* +width+ +square-size+)))
+     (* +well-width+ +square-size+)))
 (defconstant +window-height+
   (+ (* 2 +border-pixels+)
-     (* +height+ +square-size+)
+     (* +well-height+ +square-size+)
      +pixels-for-score+))
 
 (defparameter *blue* (gamekit:vec4 0 0 1 1))
@@ -54,7 +50,7 @@
                   (* +bar+ +square-size+)
                   1)))
     (gamekit:draw-rect (gamekit:vec2 +border-pixels+ bar-y)
-                       (* +square-size+ +width+)
+                       (* +square-size+ +well-width+)
                        1
                        :fill-paint *red*)))
 
@@ -107,16 +103,10 @@
           (setf *piece*
                 (if (state-game-over *state*)
                     nil
-                    (get-worst-piece-in-middle *state*))))
+                    (get-worst-piece *state*))))
         (let ((new-piece (funcall piece-move *piece*)))
           (when (valid-position-p *state* new-piece)
             (setf *piece* new-piece))))))
-
-(defun get-worst-piece-in-middle (state)
-  (let ((next-piece (get-worst-piece state)))
-    (setf (slot-value next-piece 'x)
-          (+ 3 (piece-x next-piece)))
-    next-piece))
 
 (defun draw-square (x y colour)
   (gamekit:draw-rect (gamekit:vec2 (+ +border-pixels+
@@ -130,8 +120,6 @@
                      :fill-paint colour))
 
 (defun play-game ()
-  (setf *state* (new-state :width +width+
-                           :height +height+
-                           :bar +bar+))
-  (setf *piece* (get-worst-piece-in-middle *state*))
+  (setf *state* (new-state))
+  (setf *piece* (get-worst-piece *state*))
   (gamekit:start 'hatetris))
