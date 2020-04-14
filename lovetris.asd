@@ -11,7 +11,5 @@
   :serial t
   :components ((:file "package")
                (:file "hatetris")
-               (:file "enemy-ai")
                (:file "player-ai")
-               (:file "game")
                (:file "play")))

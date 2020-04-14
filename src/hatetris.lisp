@@ -14,6 +14,32 @@
 ;; hide the internals. Oh well.
 (defstruct state well score bar game-over)
 
+(defun new-state (&key (width 10) (height 20) (bar 4))
+  (make-state :well (make-array (list height width) :initial-element +empty+)
+              :score 0
+              :bar bar
+              :game-over nil))
+
+(defun get-square (state x y)
+  (aref (state-well state) y x))
+
+(defun set-square! (state x y new-square)
+  (setf (aref (state-well state) y x) new-square))
+
+(defun well-width (state)
+  (array-dimension (state-well state) 1))
+
+(defun well-height (state)
+  (array-dimension (state-well state) 0))
+
+(defun tower-height (state)
+  (loop for y from (1- (well-height state)) downto 0
+        while (not (row-empty-p state y))
+        finally (return
+                  (- (well-height state)
+                     y
+                     1))))
+
 (defun state-hash (state)
   (+ (* 2 (well-hash state))
      (* 3 (state-score state))
@@ -47,6 +73,38 @@
               :score (state-score state)
               :bar (state-bar state)
               :game-over (state-game-over state)))
+
+(defun tower-above-bar (state)
+  (not (row-empty-p state (1- (state-bar state)))))
+
+(defun clear-filled-rows! (state)
+  (let* ((filled-rows
+           (loop for y from 0 below (well-height state)
+                 when (row-full-p state y)
+                 sum 1))
+         (new-score (+ filled-rows (state-score state))))
+    (setf (slot-value state 'score) new-score)
+    ;; Clear full rows and move down the tower.
+    (loop for y from 0 below (well-height state) do
+          (when (row-full-p state y)
+            (loop for x from 0 below (well-width state) do
+                  (set-square! state x y +empty+))
+            (loop for y-above from (1- y) downto 0 do
+                  (loop for x from 0 below (well-width state) do
+                        (when (equalp +full+ (get-square state x y-above))
+                          ;; Move the square down.
+                          (set-square! state x y-above +empty+)
+                          (set-square! state x (1+ y-above) +full+))))))))
+
+(defun row-full-p (state y)
+  (row-does-not-contain +empty+ state y))
+
+(defun row-empty-p (state y)
+  (row-does-not-contain +full+ state y))
+
+(defun row-does-not-contain (square-type state y)
+  (not (loop for x from 0 below (well-width state)
+             thereis (equalp square-type (get-square state x y)))))
 
 ;; A piece has a 4x4 bounding box.
 ;; We track the x,y coordinates of the upper
@@ -83,32 +141,6 @@
         #'piece-down
         #'piece-rotate))
 
-(defun new-state (&key (width 10) (height 20) (bar 4))
-  (make-state :well (make-array (list height width) :initial-element +empty+)
-              :score 0
-              :bar bar
-              :game-over nil))
-
-(defun get-square (state x y)
-  (aref (state-well state) y x))
-
-(defun set-square! (state x y new-square)
-  (setf (aref (state-well state) y x) new-square))
-
-(defun well-width (state)
-  (array-dimension (state-well state) 1))
-
-(defun well-height (state)
-  (array-dimension (state-well state) 0))
-
-(defun tower-height (state)
-  (loop for y from (1- (well-height state)) downto 0
-        while (not (row-empty-p state y))
-        finally (return 
-                  (- (well-height state)
-                     y
-                     1))))
-
 (defun merge-piece (state piece)
   ;; Override the name of 'state' to avoid confusion, don't
   ;; want the copy & the original in the same namespace.
@@ -122,37 +154,10 @@
         (clear-filled-rows! state))
     state))
 
-(defun tower-above-bar (state)
-  (not (row-empty-p state (1- (state-bar state)))))
-
-(defun clear-filled-rows! (state)
-  (let* ((filled-rows
-           (loop for y from 0 below (well-height state)
-                 when (row-full-p state y)
-                 sum 1))
-         (new-score (+ filled-rows (state-score state))))
-    (setf (slot-value state 'score) new-score)
-    ;; Clear full rows and move down the tower.
-    (loop for y from 0 below (well-height state) do
-          (when (row-full-p state y)
-            (loop for x from 0 below (well-width state) do
-                  (set-square! state x y +empty+))
-            (loop for y-above from (1- y) downto 0 do
-                  (loop for x from 0 below (well-width state) do
-                        (when (equalp +full+ (get-square state x y-above))
-                          ;; Move the square down.
-                          (set-square! state x y-above +empty+)
-                          (set-square! state x (1+ y-above) +full+))))))))
-
-(defun row-full-p (state y)
-  (row-does-not-contain +empty+ state y))
-
-(defun row-empty-p (state y)
-  (row-does-not-contain +full+ state y))
-
-(defun row-does-not-contain (square-type state y)
-  (not (loop for x from 0 below (well-width state)
-             thereis (equalp square-type (get-square state x y)))))
+(defun possible-next-states (state)
+  (if (state-game-over state)
+      (list)
+      (get-placements state (get-worst-piece state))))
 
 (defun get-placements (state piece)
   ;; Move piece down to the area of interest so that we
@@ -264,6 +269,28 @@
                                       (length orientations))))
     (values next-orientation-index
             (nth next-orientation-index orientations))))
+
+(defun get-worst-piece (state)
+  ;; Important: if 2 pieces have the same score, this will
+  ;; return the one that appears first. Necessary to mimic
+  ;; the original HATETRIS.
+  (first-max (get-pieces)
+             (lambda (piece)
+               (score-piece state piece))))
+
+(defun first-max (xs key)
+  ;; Have to reverse the list first, otherwise it'll return the
+  ;; last x to have the max value. It's annoying that this takes
+  ;; so much effort.
+  (alexandria:extremum (reverse xs) #'> :key key))
+
+(defun score-piece (state piece)
+  ;; Score based on min tower height achievable. We can then pick the
+  ;; worst piece by maximising the minimum tower height.
+  (apply
+   #'min
+   (mapcar #'tower-height
+           (get-placements state piece))))
 
 (defun generate-piece (template)
   ;; Generate all of the piece's possible orientations, add
