@@ -16,14 +16,17 @@
 
 ;; Should really make this a class and
 ;; hide the internals. Oh well.
-(defstruct state well score bar game-over)
+;; last-move-sequence is a list of move IDs (e.g. (D U R)), most
+;; recent move comes first.
+(defstruct state well score bar game-over last-move-sequence)
 
 (defun new-state ()
   (make-state :well (make-array (list +well-height+ +well-width+)
                                 :initial-element +empty+)
               :score 0
               :bar +bar+
-              :game-over nil))
+              :game-over nil
+              :last-move-sequence nil))
 
 (defun get-square (state x y)
   (aref (state-well state) y x))
@@ -141,12 +144,13 @@
                             (orientation ,new-orientation)))))
 
 (defparameter *piece-moves*
-  (list #'piece-left
-        #'piece-right
-        #'piece-down
-        #'piece-rotate))
+  (list
+   (list #'piece-down "D")
+   (list #'piece-left "L")
+   (list #'piece-right "R")
+   (list #'piece-rotate "U")))
 
-(defun merge-piece (state piece)
+(defun merge-piece (state piece &optional move-sequence)
   ;; Override the name of 'state' to avoid confusion, don't
   ;; want the copy & the original in the same namespace.
   (let ((state (deep-copy-state state)))
@@ -157,6 +161,7 @@
     (if (tower-above-bar state)
         (setf (slot-value state 'game-over) t)
         (clear-filled-rows! state))
+    (setf (slot-value state 'last-move-sequence) move-sequence)
     state))
 
 (defun possible-next-states (state)
@@ -167,33 +172,46 @@
 (defun get-placements (state piece)
   ;; Move piece down to the area of interest so that we
   ;; don't waste time.
-  (loop while (bbox-above-tower state piece) do
-        (setf piece (piece-down piece)))
-  ;; Keep track of piece positions / orientations we've
-  ;; seen before.
-  (let ((seen (make-hash-table :test #'equal)))
-    ;; Now do a depth first search to find valid piece positions
-    ;; using the left, right, down & rotate movements. Have to keep
-    ;; track of positions we've seen before, otherwise we'd end up
-    ;; in an infinite loop.
-    (let ((locked-positions (list))
-          (positions (list piece)))
-      (loop while positions do
-            (let ((piece (pop positions)))
-              (when (lockable-p state piece)
-                (push piece locked-positions))
-              (loop for move in *piece-moves* do
-                    (let ((next-position (funcall move piece)))
-                      (when (and (not (seen-p seen next-position))
-                                 (valid-position-p state next-position))
-                        (add-to-seen seen next-position)
-                        (push next-position positions))))))
-      (mapcar (lambda (piece) (merge-piece state piece))
-              ;; Some of the positions are duplicates, it's just
-              ;; that the bounding box is in a different position
-              ;; and the piece itself is in an equivalent but
-              ;; translated orientation.
-              (remove-duplicate-positions locked-positions)))))
+  (let ((initial-move-sequence (list)))
+    (loop while (bbox-above-tower state piece) do
+          (setf piece (piece-down piece))
+          (push "D" initial-move-sequence))
+    ;; Keep track of piece positions / orientations we've
+    ;; seen before.
+    (let ((seen (make-hash-table :test #'equal)))
+      ;; Now do a depth first search to find valid piece positions
+      ;; using the left, right, down & rotate movements. Have to keep
+      ;; track of positions we've seen before, otherwise we'd end up
+      ;; in an infinite loop.
+      (let ((locked-positions (list))
+            (positions (list (list piece initial-move-sequence))))
+        (loop while positions do
+              (let* ((position (pop positions))
+                     (piece (car position))
+                     (move-sequence (cadr position)))
+                (when (lockable-p state piece)
+                  (push position locked-positions))
+                (loop for (move move-id) in *piece-moves* do
+                      (let ((next-piece (funcall move piece)))
+                        (when (and (not (seen-p seen next-piece))
+                                   (valid-position-p state next-piece))
+                          (add-to-seen seen next-piece)
+                          (push (list next-piece (cons move-id move-sequence))
+                                positions))))))
+        ;; I HATE this code...
+        ;; If it helps to clarify for my future self, what I have referred
+        ;; to as a "position" here is a list containing a piece and the move
+        ;; sequence that was necessary to get it there.
+        ;; This whole function is in bad need of refactoring.
+        (mapcar (lambda (position)
+                  (apply (lambda (piece move-sequence)
+                           (merge-piece state piece move-sequence))
+                         position))
+                ;; Some of the positions are duplicates, it's just
+                ;; that the bounding box is in a different position
+                ;; and the piece itself is in an equivalent but
+                ;; translated orientation.
+                (remove-duplicate-positions locked-positions))))))
 
 (defun seen-p (seen piece)
   (gethash (piece-key piece) seen))
@@ -208,11 +226,14 @@
   (let ((uniques (list)))
     (loop for position in positions do
           (setf uniques
-                (adjoin position uniques :test #'are-duplicates)))
+                (adjoin position
+                        uniques
+                        :test (lambda (pos1 pos2)
+                                (are-duplicates (car pos1) (car pos2))))))
     uniques))
 
 (defun are-duplicates (p1 p2)
-  ;; Consider the positions to be equal
+  ;; Consider the pieces to be equal
   ;; if they have all the same absolute
   ;; coordinates (not necessarily in the
   ;; same order).

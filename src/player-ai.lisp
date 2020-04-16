@@ -2,25 +2,62 @@
 
 (in-package lovetris)
 
-;;; Look 1 move ahead and pick the next state
-;;; that maximises heuristics.
-(defun place-greedily (heuristic-evaluator)
-  (lambda (state piece)
-    (let* ((state-score-pairs
-             (mapcar (lambda (next-state)
-                       (cons next-state
-                             (funcall heuristic-evaluator
-                                      next-state)))
-                     (get-placements state piece)))
-           (best-score (apply #'max (mapcar #'cdr state-score-pairs)))
-           (best-states
-             (remove-if-not (lambda (pair)
-                              (= best-score (cdr pair)))
-                            state-score-pairs)))
-      ;; If multiple states have the best score, pick one
-      ;; at random.
-      (car (nth (random (length best-states))
-                best-states)))))
+(defun run-searcher (searcher-init &optional max-states)
+  "Returns final score and hex-encoded sequence of moves."
+  (let* ((i 0)
+         (state (new-state))
+         (searcher (funcall searcher-init state)))
+    (let ((states
+            (loop while (and (not (state-game-over state))
+                             (or (not max-states)
+                                 (< i max-states)))
+                  do (incf i)
+                  do (setf state (advance searcher))
+                  collect state)))
+      (values (state-score (car (last states)))
+              (encode-game states)))))
+
+(defun encode-game (states)
+  (let* ((moves (extract-moves states))
+         (n-moves (length moves)))
+    (apply #'concatenate
+           'string
+           (mapcar #'move-pair-to-hex
+                   (loop :for (a b)
+                         :on (if (= 0 (mod n-moves 2))
+                                 moves
+                                 (append moves (list "D")))
+                         :by #'cddr
+                         :while b
+                         :collect (concatenate 'string a b))))))
+
+(defun extract-moves (states)
+  (apply #'append
+         (mapcar (lambda (state)
+                   ;; Gotta reverse, moves are stored most recent first.
+                   (reverse (state-last-move-sequence state)))
+                 states)))
+
+(defparameter *hex-mapping*
+  '(("LL" "0")
+    ("LR" "1")
+    ("LD" "2")
+    ("LU" "3")
+    ("RL" "4")
+    ("RR" "5")
+    ("RD" "6")
+    ("RU" "7")
+    ("DL" "8")
+    ("DR" "9")
+    ("DD" "A")
+    ("DU" "B")
+    ("UL" "C")
+    ("UR" "D")
+    ("UD" "E")
+    ("UU" "F")))
+
+(defun move-pair-to-hex (move-pair)
+  (cadr (assoc move-pair *hex-mapping* :test #'equalp)))
 
 (defclass beam-searcher ()
   ((beam-width
