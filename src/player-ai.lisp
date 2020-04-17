@@ -20,6 +20,8 @@
 (defun encode-game (states)
   (let* ((moves (extract-moves states))
          (n-moves (length moves)))
+    (princ states)
+    (terpri)
     (apply #'concatenate
            'string
            (mapcar #'move-pair-to-hex

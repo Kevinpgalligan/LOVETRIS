@@ -179,30 +179,35 @@
     ;; Keep track of piece positions / orientations we've
     ;; seen before.
     (let ((seen (make-hash-table :test #'equal)))
-      ;; Now do a depth first search to find valid piece positions
+      ;; Now do a breadth first search to find valid piece positions
       ;; using the left, right, down & rotate movements. Have to keep
       ;; track of positions we've seen before, otherwise we'd end up
-      ;; in an infinite loop.
+      ;; in an infinite loop. Breadth first search is preferred over
+      ;; depth first search because it gives the shortest move sequence
+      ;; to reach each position.
       (let ((locked-positions (list))
-            (positions (list (list piece initial-move-sequence))))
-        (loop while positions do
-              (let* ((position (pop positions))
+            (positions (queue:make-queue
+                        :initial-contents (list (list piece initial-move-sequence)))))
+        (loop while (not (queue:queue-empty-p positions)) do
+              (let* ((position (queue:queue-pop positions))
                      (piece (car position))
                      (move-sequence (cadr position)))
                 (when (lockable-p state piece)
-                  (push position locked-positions))
+                  ;; One extra move is required to lock it in place.
+                  (push (list piece (cons "D" move-sequence))
+                        locked-positions))
                 (loop for (move move-id) in *piece-moves* do
                       (let ((next-piece (funcall move piece)))
                         (when (and (not (seen-p seen next-piece))
                                    (valid-position-p state next-piece))
                           (add-to-seen seen next-piece)
-                          (push (list next-piece (cons move-id move-sequence))
-                                positions))))))
-        ;; I HATE this code...
+                          (queue:queue-push
+                           (list next-piece (cons move-id move-sequence))
+                           positions))))))
+        ;; I HATE the code in this function, need to refactor it.
         ;; If it helps to clarify for my future self, what I have referred
         ;; to as a "position" here is a list containing a piece and the move
         ;; sequence that was necessary to get it there.
-        ;; This whole function is in bad need of refactoring.
         (mapcar (lambda (position)
                   (apply (lambda (piece move-sequence)
                            (merge-piece state piece move-sequence))
@@ -225,14 +230,28 @@
   ;; of positions, anyway.
   (let ((uniques (list)))
     (loop for position in positions do
-          (setf uniques
-                (adjoin position
-                        uniques
-                        :test (lambda (pos1 pos2)
-                                (are-duplicates (car pos1) (car pos2))))))
+          (setf uniques (add-if-unique position uniques)))
     uniques))
 
-(defun are-duplicates (p1 p2)
+(defun add-if-unique (position uniques)
+  ;; Using custom code here so that a position can be
+  ;; swapped for an equivalent one when the equivalent
+  ;; one has a shorter move sequence. Makes the replay
+  ;; look nicer.
+  (if (not uniques)
+      (list position)
+      (let ((next (car uniques)))
+        (cond
+          ((not (equivalent-pieces (car next) (car position)))
+           (cons next
+                 (add-if-unique position (cdr uniques))))
+          ((>= (length (cadr position))
+               (length (cadr next)))
+           uniques)
+          (t
+           (cons position (cdr uniques)))))))
+
+(defun equivalent-pieces (p1 p2)
   ;; Consider the pieces to be equal
   ;; if they have all the same absolute
   ;; coordinates (not necessarily in the

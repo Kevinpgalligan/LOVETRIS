@@ -10,6 +10,7 @@
   :pathname "src"
   :serial t
   :components ((:file "package")
+               (:file "queue")
                (:file "hatetris")
                (:file "player-ai")
                (:file "play")))

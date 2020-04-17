@@ -12,8 +12,11 @@ May need to do some special stuff to get the trivial-gamekit package working, se
 5. ~~Play through some games myself to test it (incl. world record games). Hopefully this won't turn up any bugs.~~
 6. ~~Greedy search (algorithm and heuristics).~~
 7. ~~Beam search.~~
-8. Some way of replaying games, in order to analyze AI behaviour.
+8. ~~Some way of replaying games, in order to analyze AI behaviour.~~
 9. Analyze redundancy in beam search, i.e. how often do the branches converge. What percentage of states are duplicates in the fully-expanded tree. Depending on the results of this analysis, it might be worth implementing caching to avoid wasting time on duplicate paths / to encourage diversity.
 10. Investigate performance limits: time to advance a step for increasing search depth and beam width. And the scores achieved by each of them. If deemed worthwhile, profile code and improve its performance.
 11. Rework genetic algo code to find best heuristic weights for beam search.
 12. Monte Carlo Tree Search.
+
+### Credits
+Jeffrey Massung for his queue implementation (https://github.com/massung/queue)
