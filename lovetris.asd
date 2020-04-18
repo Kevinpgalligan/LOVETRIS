@@ -13,4 +13,5 @@
                (:file "queue")
                (:file "hatetris")
                (:file "player-ai")
+               (:file "beam-search")
                (:file "play")))

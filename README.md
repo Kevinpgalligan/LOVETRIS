@@ -13,10 +13,14 @@ May need to do some special stuff to get the trivial-gamekit package working, se
 6. ~~Greedy search (algorithm and heuristics).~~
 7. ~~Beam search.~~
 8. ~~Some way of replaying games, in order to analyze AI behaviour.~~
-9. Analyze redundancy in beam search, i.e. how often do the branches converge. What percentage of states are duplicates in the fully-expanded tree. Depending on the results of this analysis, it might be worth implementing caching to avoid wasting time on duplicate paths / to encourage diversity.
-10. Investigate performance limits: time to advance a step for increasing search depth and beam width. And the scores achieved by each of them. If deemed worthwhile, profile code and improve its performance.
-11. Rework genetic algo code to find best heuristic weights for beam search.
-12. Monte Carlo Tree Search.
+9. ~~Analyze redundancy in beam search, i.e. how often do the branches converge. What percentage of states are duplicates in the fully-expanded tree. Depending on the results of this analysis, it might be worth implementing caching to avoid wasting time on duplicate paths / to encourage diversity.~~
+10. Fill in the article in chronological order: write what I can / make gameplay videos; implement random search, show video; implement blind greedy search, show video.
+11. Implement evolutionary stuff (generic version) for optimising greedy search, new video.
+12. Video for results of untuned beam search.
+13. Beam search state caching.
+14. Optimise / profiling / multi-threading, find best combination of beam width & search depth.
+15. Evolve better parameters for beam search.
+16. Write up final beam search results. If record-breaking, leave it at that. If not, move on to Monte Carlo.
 
 ### Credits
-Jeffrey Massung for his queue implementation (https://github.com/massung/queue)
+Jeffrey Massung for his queue implementation (https://github.com/massung/queue), which I copy/pasted here (with the addition of a new method).
