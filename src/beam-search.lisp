@@ -6,6 +6,11 @@
     :initform 2
     :reader beam-width
     :documentation "How many states to explore at each depth of the search tree.")
+   (disable-beam
+    :initarg :disable-beam
+    :initform nil
+    :reader disable-beam
+    :documentation "If true, removes the beam width limitation and this turns into plain ol' greedy search.")
    (search-depth
     :initarg :search-depth
     :initform 6
@@ -69,8 +74,10 @@
                          (possible-next-states (state node)))
                  #'>
                  :key #'heuristic-value)))
-          ;; Only add the best N nodes to the tree, where N
-          ;; is the width of the beam search.
-          (loop for child in possible-child-nodes
-                for i from 0 below (beam-width searcher)
-                collect child))))
+          (if (disable-beam searcher)
+              possible-child-nodes
+              ;; Only add the best N nodes to the tree, where N
+              ;; is the width of the beam search.
+              (loop for child in possible-child-nodes
+                    for i from 0 below (beam-width searcher)
+                    collect child)))))

@@ -4,9 +4,6 @@
 
 (in-package lovetris)
 
-(defconstant +empty+ 0)
-(defconstant +full+ 1)
-
 (defconstant +bbox-size+ 4)
 (defconstant +n-orientations+ 4)
 
@@ -14,31 +11,79 @@
 (defconstant +well-height+ 20)
 (defconstant +bar+ 4)
 
-;; Should really make this a class and
-;; hide the internals. Oh well.
-;; last-move-sequence is a list of move IDs (e.g. (D U R)), most
-;; recent move comes first.
-(defstruct state well score bar game-over last-move-sequence)
+(defclass state ()
+  ((well
+    :initarg :well
+    :initform (error "Must define well.")
+    :reader well)
+   (score
+    :initarg :score
+    :accessor score)
+   (bar
+    :initarg :bar
+    :reader bar)
+   (game-over
+    :initarg :game-over
+    :accessor game-over)
+   (last-move-sequence
+    :initarg :last-move-sequence
+    :initform nil
+    :accessor last-move-sequence)))
 
-(defun new-state ()
-  (make-state :well (make-array (list +well-height+ +well-width+)
-                                :initial-element +empty+)
-              :score 0
-              :bar +bar+
-              :game-over nil
-              :last-move-sequence nil))
+(defun make-state ()
+  (make-instance 'state
+                 :well (make-array +well-height+
+                                   :element-type `(unsigned-byte ,+well-width+)
+                                   :initial-element 0)
+                 :score 0
+                 :bar +bar+
+                 :game-over nil
+                 :last-move-sequence nil))
 
-(defun get-square (state x y)
-  (aref (state-well state) y x))
+(defun full-square-p (state x y)
+  (< 0 (logand (ash 1 x) (aref (well state) y))))
 
-(defun set-square! (state x y new-square)
-  (setf (aref (state-well state) y x) new-square))
+(defun empty-square-p (state x y)
+  (not (full-square-p state x y)))
+
+(defun fill-square! (state x y)
+  (setf (aref (well state) y)
+        (logior (aref (well state) y)
+                (ash 1 x))))
+
+(defun clear-square! (state x y)
+  (setf (aref (well state) y)
+        (logand (aref (well state) y)
+                (lognot (ash 1 x)))))
+
+(defun clear-row! (state y)
+  (setf (aref (well state) y) 0))
+
+(defun shift-row-down! (state y n)
+  "Shift a row down by N."
+  (setf (aref (well state) (+ y n))
+        (aref (well state) y))
+  (clear-row! state y))
+
+(defun row-full-p (state y)
+  ;; Some bitwise trickery.
+  ;; Shift operation on 1 gives something
+  ;; like 100000, decrementing gives 11111.
+  (= (1- (ash 1 (well-width state)))
+     (aref (well state) y)))
+
+(defun row-empty-p (state y)
+  (= 0 (aref (well state) y)))
 
 (defun well-width (state)
-  (array-dimension (state-well state) 1))
+  ;; I was trying to make the implementation flexible
+  ;; enough to support any well size, but now I've given
+  ;; up on that.
+  (declare (ignore state))
+  +well-width+)
 
 (defun well-height (state)
-  (array-dimension (state-well state) 0))
+  (array-total-size (well state)))
 
 (defun tower-height (state)
   (loop for y from (1- (well-height state)) downto 0
@@ -50,9 +95,9 @@
 
 (defun state-hash (state)
   (+ (* 2 (well-hash state))
-     (* 3 (state-score state))
-     (* 5 (state-bar state))
-     (* 7 (if (state-game-over state) 1 0))))
+     (* 3 (score state))
+     (* 5 (bar state))
+     (* 7 (if (game-over state) 1 0))))
 
 (defparameter *primes*
   (list 2 3 5 7 11 13 17 19 23 29 31 37 41 43
@@ -61,58 +106,43 @@
         163 167 173 179 181 191 193 197 199))
 
 (defun well-hash (state)
-  ;; Treat rows as binary numbers. Multiply
-  ;; them by primes. And sum them.
+  ;; Multiply rows by primes and sum them.
   ;; THIS WON'T BE ABLE TO PROCESS ALL OF THE ROWS IF
   ;; THERE ARE MORE ROWS THAN THE NUMBER OF PRIMES
   ;; IN *primes*. I've tried to add enough primes for
   ;; any occasion, but you never know.
-  (mod (loop for y from (state-bar state) below (well-height state)
+  (mod (loop for row across (well state)
              for prime in *primes*
-             sum (* prime
-                    (loop for x from 0 below (well-width state)
-                          sum (if (equalp +empty+ (get-square state x y))
-                                  0
-                                  (expt 2 x)))))
+             sum (* prime row))
        (expt 10 20)))
 
 (defun deep-copy-state (state)
-  (make-state :well (alexandria:copy-array (state-well state))
-              :score (state-score state)
-              :bar (state-bar state)
-              :game-over (state-game-over state)))
+  (make-instance 'state
+                 :well (alexandria:copy-array (well state))
+                 :score (score state)
+                 :bar (bar state)
+                 :game-over (game-over state)))
 
 (defun tower-above-bar (state)
-  (not (row-empty-p state (1- (state-bar state)))))
+  (not (row-empty-p state (1- (bar state)))))
 
-(defun clear-filled-rows! (state)
-  (let* ((filled-rows
-           (loop for y from 0 below (well-height state)
-                 when (row-full-p state y)
-                 sum 1))
-         (new-score (+ filled-rows (state-score state))))
-    (setf (slot-value state 'score) new-score)
-    ;; Clear full rows and move down the tower.
-    (loop for y from 0 below (well-height state) do
-          (when (row-full-p state y)
-            (loop for x from 0 below (well-width state) do
-                  (set-square! state x y +empty+))
-            (loop for y-above from (1- y) downto 0 do
-                  (loop for x from 0 below (well-width state) do
-                        (when (equalp +full+ (get-square state x y-above))
-                          ;; Move the square down.
-                          (set-square! state x y-above +empty+)
-                          (set-square! state x (1+ y-above) +full+))))))))
-
-(defun row-full-p (state y)
-  (row-does-not-contain +empty+ state y))
-
-(defun row-empty-p (state y)
-  (row-does-not-contain +full+ state y))
-
-(defun row-does-not-contain (square-type state y)
-  (not (loop for x from 0 below (well-width state)
-             thereis (equalp square-type (get-square state x y)))))
+(defun clear-full-rows! (state)
+  "Updates well & score of state."
+  (let ((full-rows 0))
+    (loop for y from (1- (well-height state)) downto 0 do
+          (cond
+            ((row-full-p state y)
+             (progn
+               (clear-row! state y)
+               (incf full-rows)))
+            ((row-empty-p state y)
+             ;; We've passed the top of the tower, no more
+             ;; rows to clear or shift down.
+             (return))
+            ((> full-rows 0)
+             (shift-row-down! state y full-rows))))
+    (incf (score state)
+          full-rows)))
 
 ;; A piece has a 4x4 bounding box.
 ;; We track the x,y coordinates of the upper
@@ -155,17 +185,17 @@
   ;; want the copy & the original in the same namespace.
   (let ((state (deep-copy-state state)))
     (loop for (x y) in (piece-absolute-coords piece) do
-          (set-square! state x y +full+))
-    ;; Don't clear filled rows if the tower is above
+          (fill-square! state x y))
+    ;; Don't clear full rows if the tower is above
     ;; the bar, as per the original HATETRIS.
     (if (tower-above-bar state)
         (setf (slot-value state 'game-over) t)
-        (clear-filled-rows! state))
+        (clear-full-rows! state))
     (setf (slot-value state 'last-move-sequence) move-sequence)
     state))
 
 (defun possible-next-states (state)
-  (if (state-game-over state)
+  (if (game-over state)
       (list)
       (get-placements state (get-worst-piece state))))
 
@@ -264,17 +294,13 @@
 (defun valid-position-p (state piece)
   (not (loop for (x y) in (piece-absolute-coords piece)
              thereis (or (outside-well-p state x y)
-                         (overlaps-p state x y)))))
+                         (full-square-p state x y)))))
 
 (defun outside-well-p (state x y)
   (or (< x 0)
       (< y 0)
       (>= x (well-width state))
       (>= y (well-height state))))
-
-(defun overlaps-p (state x y)
-  (equalp +full+
-          (get-square state x y)))
 
 ;; A piece can be locked in place if it's resting on
 ;; something else, e.g. the bottom of the well or a
@@ -283,7 +309,7 @@
   (loop for (x y) in (piece-absolute-coords piece)
         thereis (let ((below-y (1+ y)))
                   (or (>= below-y (well-height state))
-                      (overlaps-p state x below-y)))))
+                      (full-square-p state x below-y)))))
 
 (defun piece-key (piece)
   (list (piece-x piece)

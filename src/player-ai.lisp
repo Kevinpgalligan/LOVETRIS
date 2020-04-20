@@ -5,16 +5,16 @@
 (defun run-searcher (searcher-init &optional max-states)
   "Returns final score and hex-encoded sequence of moves."
   (let* ((i 0)
-         (state (new-state))
+         (state (make-state))
          (searcher (funcall searcher-init state)))
     (let ((states
-            (loop while (and (not (state-game-over state))
+            (loop while (and (not (game-over state))
                              (or (not max-states)
                                  (< i max-states)))
                   do (incf i)
                   do (setf state (advance searcher))
                   collect state)))
-      (values (state-score (car (last states)))
+      (values (score (car (last states)))
               (encode-game states)))))
 
 (defun encode-game (states)
@@ -35,7 +35,7 @@
   (apply #'append
          (mapcar (lambda (state)
                    ;; Gotta reverse, moves are stored most recent first.
-                   (reverse (state-last-move-sequence state)))
+                   (reverse (last-move-sequence state)))
                  states)))
 
 (defparameter *hex-mapping*
@@ -77,6 +77,10 @@
                  :state state
                  :heuristic-value heuristic-value))
 
+(defun count-nodes (node)
+  "Count nodes in the tree rooted at the given node."
+  (+ 1 (apply #'+ (mapcar #'count-nodes (children node)))))
+
 (defgeneric advance (tree-searcher)
   (:documentation "Get tree searcher to advance and return the next state."))
 
@@ -86,7 +90,7 @@
 (defun get-heuristic-eval (w-aggregate-height w-score w-holes w-bumpiness)
   (lambda (state)
     (+ (* w-aggregate-height (aggregate-height state))
-       (* w-score (state-score state))
+       (* w-score (score state))
        (* w-holes (num-holes state))
        (* w-bumpiness (bumpiness state)))))
 
@@ -96,7 +100,7 @@
 
 (defun column-height (state x)
   (loop for y from 0 below (well-height state)
-        while (equalp +empty+ (get-square state x y))
+        while (empty-square-p state x y)
         finally (return (- (well-height state) y))))
 
 (defun num-holes (state)
@@ -108,8 +112,8 @@
               ;; Also, this seems to be a weird definition of
               ;; a "hole", should it perhaps be surrounded on
               ;; the sides as well?
-              (if (and (equalp +empty+ (get-square state x y))
-                       (equalp +full+ (get-square state x (- y 1))))
+              (if (and (empty-square-p state x y)
+                       (full-square-p state x (- y 1)))
                   1
                   0))))
 

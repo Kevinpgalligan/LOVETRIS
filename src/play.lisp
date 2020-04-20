@@ -32,7 +32,7 @@
         (loop for x from 0 below (well-width *state*) do
               (draw-square x
                            y
-                           (if (equalp +full+ (get-square *state* x y))
+                           (if (full-square-p *state* x y)
                                *blue*
                                *black*))))
   ;; Draw piece.
@@ -40,7 +40,7 @@
     (loop for (x y) in (piece-absolute-coords *piece*) do
           (draw-square x y *red*)))
   ;; Draw score.
-  (gamekit:draw-text (format nil "Score: ~D" (state-score *state*))
+  (gamekit:draw-text (format nil "Score: ~D" (score *state*))
                      (gamekit:vec2 (* 2 +border-pixels+)
                                    (+ +border-pixels+
                                       (/ +pixels-for-score+ 3))))
@@ -101,7 +101,7 @@
         (progn
           (setf *state* (merge-piece *state* *piece*))
           (setf *piece*
-                (if (state-game-over *state*)
+                (if (game-over *state*)
                     nil
                     (get-worst-piece *state*))))
         (let ((new-piece (funcall piece-move *piece*)))
@@ -120,6 +120,6 @@
                      :fill-paint colour))
 
 (defun play-game ()
-  (setf *state* (new-state))
+  (setf *state* (make-state))
   (setf *piece* (get-worst-piece *state*))
   (gamekit:start 'hatetris))
