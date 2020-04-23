@@ -15,8 +15,8 @@ May need to do some special stuff to get the trivial-gamekit package working, se
 8. ~~Some way of replaying games, in order to analyze AI behaviour.~~
 9. ~~Analyze redundancy in beam search, i.e. how often do the branches converge. What percentage of states are duplicates in the fully-expanded tree. Depending on the results of this analysis, it might be worth implementing caching to avoid wasting time on duplicate paths / to encourage diversity.~~
 10. ~~Fill in the article in chronological order: write what I can / make gameplay videos; implement random search, show video; implement blind greedy search, show video.~~
-11. Make sure that it can run a full game to completion; if not, try again with increased heap size.
-12. Low-hanging fruit optimisation, if such fruit exists.
+11. ~~Try again with increased heap size, & also hint to compiler (set children to nil).~~
+12. Low-hanging fruit optimisation, if such fruit exists. Possible candidates: 1) don't recalculate placement of worst piece, should save 1/8 of the work in possible-next-states. 2) remove-duplicate-positions is taking up 20% of the time, make that shit more efficient.
 13. Implement evolutionary stuff (generic version) for optimising greedy search, update article with the best greedy parameters I can find (video, explanation).
 14. Beam search state caching.
 15. Optimise / profiling / multi-threading, find best combination of beam width & search depth.

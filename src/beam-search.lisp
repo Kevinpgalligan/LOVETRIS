@@ -38,6 +38,15 @@
           (alexandria:extremum (children (search-tree searcher))
                                #'>
                                :key #'heuristic-value)))
+    (loop for node in (children (search-tree searcher)) do
+          ;; This should help SBCL to perform garbage collection
+          ;; properly. In large data structures, such as trees, SBCL's
+          ;; garbage collector can leave entire branches of the tree
+          ;; uncollected after we've discarded them, due to its conservatism.
+          ;; Eventually, this will cause heap exhaustion. A rather nasty
+          ;; trait of the implementation.
+          (when (not (eq node next-node))
+            (destroy-tree node)))
     (setf (search-tree searcher) next-node)
     (state next-node)))
 

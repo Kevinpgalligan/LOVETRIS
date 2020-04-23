@@ -81,6 +81,12 @@
   "Count nodes in the tree rooted at the given node."
   (+ 1 (apply #'+ (mapcar #'count-nodes (children node)))))
 
+(defun destroy-tree (node)
+  "Attempts to break references between nodes in the given tree, as a hint
+to the garbage collector that it can collect."
+  (mapcar #'destroy-tree (children node))
+  (setf (children node) nil))
+
 (defgeneric advance (tree-searcher)
   (:documentation "Get tree searcher to advance and return the next state."))
 

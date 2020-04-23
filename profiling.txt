@@ -1,0 +1,24 @@
+Information from profiling...
+
+The command I ran:
+
+LOVETRIS> (time
+           (flamegraph:save-flame-graph ("~/proyectos/profiling/search.stack")
+             (run-searcher (lambda (state) (make-instance 'beam-searcher
+                                                          :disable-beam t
+                                                          :search-depth 4
+                                                          :heuristic-eval (get-heuristic-eval -0.1 1.0 -0.4 -0.4)
+                                                          :start-state state))
+                           5)))
+
+
+
+Output:
+
+Evaluation took:
+  165.556 seconds of real time
+  166.057226 seconds of total run time (163.555059 user, 2.502167 system)
+  [ Run times consist of 13.424 seconds GC time, and 152.634 seconds non-GC time. ]
+  100.30% CPU
+  365,549,870,986 processor cycles
+  150,103,373,136 bytes consed
