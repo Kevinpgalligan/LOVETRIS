@@ -30,6 +30,19 @@
     :initform nil
     :accessor last-move-sequence)))
 
+(defmethod print-object ((obj state) out)
+  (print-unreadable-object (obj out :type t)
+    (format out
+            "game-over=~a, score=~a~%~{~a~%~}"
+            (game-over obj)
+            (score obj)
+            (loop for row in (coerce (well obj) 'list)
+                  collect (reverse
+                           ;; Oops, hard-coding the width.
+                           ;; This is only used for debugging, anyway, so
+                           ;; not overly important.
+                           (format nil "~10,'0B" (ldb (byte 10 0) row)))))))
+
 (defun make-state ()
   (make-instance 'state
                  :well (make-array +well-height+
@@ -258,41 +271,19 @@
   (setf (gethash (piece-key piece) seen) t))
 
 (defun remove-duplicate-positions (positions)
-  ;; May be inefficient to use a list here, it can be
-  ;; optimised if necessary. There shouldn't be more than 10s
-  ;; of positions, anyway.
-  (let ((uniques (list)))
+  (let ((uniques (make-hash-table :test #'equal)))
     (loop for position in positions do
-          (setf uniques (add-if-unique position uniques)))
-    uniques))
-
-(defun add-if-unique (position uniques)
-  ;; Using custom code here so that a position can be
-  ;; swapped for an equivalent one when the equivalent
-  ;; one has a shorter move sequence. Makes the replay
-  ;; look nicer.
-  (if (not uniques)
-      (list position)
-      (let ((next (car uniques)))
-        (cond
-          ((not (equivalent-pieces (car next) (car position)))
-           (cons next
-                 (add-if-unique position (cdr uniques))))
-          ((>= (length (cadr position))
-               (length (cadr next)))
-           uniques)
-          (t
-           (cons position (cdr uniques)))))))
-
-(defun equivalent-pieces (p1 p2)
-  ;; Consider the pieces to be equal
-  ;; if they have all the same absolute
-  ;; coordinates (not necessarily in the
-  ;; same order).
-  (let ((p2-absolute-coords (piece-absolute-coords p2)))
-    (every (lambda (x-y-pair)
-             (find x-y-pair p2-absolute-coords :test #'equalp))
-           (piece-absolute-coords p1))))
+          (let* ((key (piece-absolute-coords (first position)))
+                 (existing (gethash key uniques)))
+            ;; Add it to the list if we haven't seen
+            ;; this position already OR the move sequence
+            ;; is shorter, this results in nicer-looking
+            ;; replays.
+            (when (or (null existing)
+                      (> (length (second existing))
+                         (length (second position))))
+              (setf (gethash key uniques) position))))
+    (alexandria:hash-table-values uniques)))
 
 (defun valid-position-p (state piece)
   (not (loop for (x y) in (piece-absolute-coords piece)
@@ -324,12 +315,16 @@
     (and (< y-below-bbox (well-height state))
          (row-empty-p state y-below-bbox))))
 
-;; Normally, coordinates are relative to the position
-;; of the bounding box. This returns the absolute version.
 (defun piece-absolute-coords (piece)
-  (loop for (x y) in (piece-coords piece) collect
-        (list (+ x (piece-x piece))
-              (+ y (piece-y piece)))))
+  "Absolute coords of piece, ordered first by x and then by y."
+  (sort
+   (loop for (x y) in (piece-coords piece) collect
+         (list (+ x (piece-x piece))
+               (+ y (piece-y piece))))
+   (lambda (c1 c2)
+     (or (< (first c1) (first c2))
+         (and (= (first c1) (first c2))
+              (< (second c1) (second c2)))))))
 
 (defparameter *piece-orientations*
   (make-hash-table :test #'equal))
@@ -371,7 +366,7 @@
   ;; Generate all of the piece's possible orientations, add
   ;; them to the map of piece -> orientations.
   ;; Then return the piece in its first orientation and starting
-  ;; position (bounding box in top left corner).
+  ;; position.
   (when (not (= +bbox-size+ (length template)))
     (error "Piece is the wrong size."))
   (defun rotate-coords (n x y)

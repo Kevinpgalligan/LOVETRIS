@@ -33,7 +33,10 @@
 (defmethod advance ((searcher beam-searcher))
   (expand-nodes (search-tree searcher)
                 (search-depth searcher)
-                searcher)
+                (heuristic-eval searcher)
+                (if (disable-beam searcher)
+                    nil
+                    (beam-width searcher)))
   (let ((next-node
           (alexandria:extremum (children (search-tree searcher))
                                #'>
@@ -52,41 +55,43 @@
 
 ;; We use this to find the path through the search tree that
 ;; has the best heuristic score at the end of it.
-(defun expand-nodes (current-node remaining-depth searcher)
+(defun expand-nodes (current-node remaining-depth heuristic-eval beam-width)
   (setf (heuristic-value current-node)
         (if (= 0 remaining-depth)
             ;; We've reached the bottom of the search tree, resort
             ;; to direct heuristic evaluation.
-            (funcall (heuristic-eval searcher) (state current-node))
+            (funcall heuristic-eval (state current-node))
             ;; Haven't reached the bottom yet, expand further.
             (progn
               (when (not (children current-node))
-                (generate-children! current-node searcher))
+                (generate-children! current-node heuristic-eval beam-width))
               ;; Might be a dead end (i.e. game over), so just use
               ;; heuristic value.
               (if (children current-node)
                   (apply #'max
                          (mapcar (lambda (child)
-                                   (expand-nodes child (1- remaining-depth) searcher))
+                                   (expand-nodes child
+                                                 (1- remaining-depth)
+                                                 heuristic-eval
+                                                 beam-width))
                                  (children current-node)))
                   (heuristic-value current-node))))))
 
-(defun generate-children! (node searcher)
+(defun generate-children! (node heuristic-eval beam-width)
   (setf (children node)
         (let ((possible-child-nodes
                 (sort
                  (mapcar (lambda (state)
                            (make-node
                             state
-                            :heuristic-value (funcall (heuristic-eval searcher)
-                                                      state)))
+                            :heuristic-value (funcall heuristic-eval state)))
                          (possible-next-states (state node)))
                  #'>
                  :key #'heuristic-value)))
-          (if (disable-beam searcher)
+          (if (null beam-width)
               possible-child-nodes
               ;; Only add the best N nodes to the tree, where N
               ;; is the width of the beam search.
               (loop for child in possible-child-nodes
-                    for i from 0 below (beam-width searcher)
+                    for i from 0 below beam-width
                     collect child)))))

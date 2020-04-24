@@ -40,3 +40,55 @@ Evaluation took:
   219,295,790,834 processor cycles
   81,838,330,832 bytes consed
 
+
+#### Attempt the third
+Tried to make remove-duplicate-pieces more efficient by using a hash table instead of my shitty home-baked function. May have slowed things down elsewhere by forcing absolute coords to be sorted every time they're called. Might be necessary to instead always store absolute coords.
+
+No, doesn't seem to have slowed things down elsewhere. Resulted in a ~10% speedup. If I'm applying optimisations / type hints, though, they should prob go in: expand-nodes, generate-children!, possible-next-states, get-worst-piece, get-placements.
+
+
+Output:
+
+Evaluation took:
+  91.804 seconds of real time
+  91.968067 seconds of total run time (90.996622 user, 0.971445 system)
+  [ Run times consist of 6.451 seconds GC time, and 85.518 seconds non-GC time. ]
+  100.18% CPU
+  45 lambdas converted
+  202,702,040,574 processor cycles
+  45,863,290,000 bytes consed
+
+
+Just as a benchmark, here's the performance with a search depth of 4 and no beam width.
+
+LOVETRIS> (time
+           (run-searcher (lambda (state)
+                           (make-instance 'beam-searcher
+                                          :disable-beam t
+                                          :search-depth 4
+                                          :heuristic-eval (get-heuristic-eval -0.1 1.0 -0.4 -0.4)
+                                          :start-state state))))
+Evaluation took:
+  1014.756 seconds of real time
+  1016.544501 seconds of total run time (1005.414730 user, 11.129771 system)
+  [ Run times consist of 48.876 seconds GC time, and 967.669 seconds non-GC time. ]
+  100.18% CPU
+  2,240,602,054,240 processor cycles
+  541,250,795,040 bytes consed
+  
+8
+"AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAA95DAAAAAAAA6AAAAA95DAAAAAAA9AAAAAA88A6AAAAAA22229AAAAAAAAAAAA2229AAAAA888FB2AEAAAAA8888AAAAAA95DAAAAAAA22AAAAAAA6AAAAA9AAAAA576AAAAAAAAAA2229AAAA888FB2AEAAAA8888AAAAA95DAAAAAA22AAAA576AAAAA80C8AAAAAAAA9AAAAA5AAAAAAAAA2228AAAAA220EAAAA83FAAAAA96AAA9AAA8883AAA8BBEEAAA56AAA8882AAA8AAAA7AAA567AAA8A2BEAAA023AA83FAAAA95AAA9AA803AAA8BA80C2A"
+
+#### Attempt the fourth
+Adding optimization declarations to expand-nodes, since it seems to have a lot of overhead. May have shaved off a second or two, but I honestly can't say for certain. At this point, I think it would be a more effective use of time to move on to multi-threading and avoiding already-explored paths in the tree.
+
+
+Output:
+
+Evaluation took:
+  90.227 seconds of real time
+  90.386108 seconds of total run time (89.383404 user, 1.002704 system)
+  [ Run times consist of 4.909 seconds GC time, and 85.478 seconds non-GC time. ]
+  100.18% CPU
+  199,223,121,532 processor cycles
+  45,862,361,168 bytes consed
