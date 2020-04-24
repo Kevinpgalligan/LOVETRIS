@@ -1,5 +1,8 @@
 Information from profiling...
 
+
+#### Attempt the first
+
 The command I ran:
 
 LOVETRIS> (time
@@ -22,3 +25,18 @@ Evaluation took:
   100.30% CPU
   365,549,870,986 processor cycles
   150,103,373,136 bytes consed
+
+#### Attempt the second
+Changed get-worst-piece to return the placements that it computed, just so that the effort doesn't have to be repeated. This seems to have had a disproportionate effect on the performance; either that, or the testing environment has changed since the first time. I expected it to reduce the time by about 1/8, since there are 7 pieces and possible-next-states used to recompute the placements for 1 of them (the worst piece).
+
+
+Output:
+
+Evaluation took:
+  99.318 seconds of real time
+  99.498931 seconds of total run time (98.122657 user, 1.376274 system)
+  [ Run times consist of 7.364 seconds GC time, and 92.135 seconds non-GC time. ]
+  100.18% CPU
+  219,295,790,834 processor cycles
+  81,838,330,832 bytes consed
+

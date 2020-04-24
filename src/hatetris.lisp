@@ -197,7 +197,10 @@
 (defun possible-next-states (state)
   (if (game-over state)
       (list)
-      (get-placements state (get-worst-piece state))))
+      (multiple-value-bind (piece placements)
+          (get-worst-piece state)
+        (declare (ignore piece))
+        placements)))
 
 (defun get-placements (state piece)
   ;; Move piece down to the area of interest so that we
@@ -345,9 +348,15 @@
   ;; Important: if 2 pieces have the same score, this will
   ;; return the one that appears first. Necessary to mimic
   ;; the original HATETRIS.
-  (first-max (get-pieces)
-             (lambda (piece)
-               (score-piece state piece))))
+  (let ((best-piece-placements-pair
+          (first-max (mapcar (lambda (piece)
+                               (list piece (get-placements state piece)))
+                             (get-pieces))
+                     ;; Return the piece with the max minimum height.
+                     (lambda (piece-placements-pair)
+                       (min-height (second piece-placements-pair))))))
+    (values (first best-piece-placements-pair)
+            (second best-piece-placements-pair))))
 
 (defun first-max (xs key)
   ;; Have to reverse the list first, otherwise it'll return the
@@ -355,13 +364,8 @@
   ;; so much effort.
   (alexandria:extremum (reverse xs) #'> :key key))
 
-(defun score-piece (state piece)
-  ;; Score based on min tower height achievable. We can then pick the
-  ;; worst piece by maximising the minimum tower height.
-  (apply
-   #'min
-   (mapcar #'tower-height
-           (get-placements state piece))))
+(defun min-height (placements)
+  (apply #'min (mapcar #'tower-height placements)))
 
 (defun generate-piece (template)
   ;; Generate all of the piece's possible orientations, add

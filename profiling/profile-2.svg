@@ -1,0 +1,2404 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="902" onload="init(evt)" viewBox="0 0 1200 902" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+	}
+
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom();
+			zoom(target);
+		}
+		else if (e.target.id == "unzoom") unzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+	}, false)
+
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+		return;
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		// Fit in full text width
+		if (/^ *$/.test(txt) || t.getSubStringLength(0, txt.length) < w)
+			return;
+
+		for (var x = txt.length - 2; x > 0; x--) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom() {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			update_text(el[i]);
+		}
+		search();
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) {
+				currentSearchTerm = term;
+				search();
+			}
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (currentSearchTerm === null) return;
+		var term = currentSearchTerm;
+
+		var re = new RegExp(term, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="902.0" fill="url(#background)"  />
+<text id="title" x="600.00" y="24" >Flame Graph</text>
+<text id="details" x="10.00" y="885" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1090.00" y="24" >Search</text>
+<text id="ignorecase" x="1174.00" y="24" >ic</text>
+<text id="matched" x="1090.00" y="885" > </text>
+<g id="frames">
+<g >
+<title>NUM-HOLES (1,270 samples, 0.94%)</title><rect x="530.6" y="709" width="11.1" height="15.0" fill="rgb(254,206,37)" rx="2" ry="2" />
+<text  x="533.56" y="719.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (8,387 samples, 6.22%)</title><rect x="1055.4" y="485" width="73.3" height="15.0" fill="rgb(220,10,21)" rx="2" ry="2" />
+<text  x="1058.36" y="495.5" >ADD-IF-U..</text>
+</g>
+<g >
+<title>(LABELS SB-IMPL::SXHASH-RECURSE :IN SXHASH) (97 samples, 0.07%)</title><rect x="840.9" y="597" width="0.9" height="15.0" fill="rgb(222,162,21)" rx="2" ry="2" />
+<text  x="843.91" y="607.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (177 samples, 0.13%)</title><rect x="1147.5" y="581" width="1.5" height="15.0" fill="rgb(210,156,22)" rx="2" ry="2" />
+<text  x="1150.49" y="591.5" ></text>
+</g>
+<g >
+<title>GETHASH3 (18 samples, 0.01%)</title><rect x="1186.3" y="693" width="0.2" height="15.0" fill="rgb(209,139,21)" rx="2" ry="2" />
+<text  x="1189.32" y="703.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (26,602 samples, 19.72%)</title><rect x="926.9" y="661" width="232.7" height="15.0" fill="rgb(212,189,5)" rx="2" ry="2" />
+<text  x="929.89" y="671.5" >ADD-IF-UNIQUE</text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (25 samples, 0.02%)</title><rect x="1116.6" y="277" width="0.3" height="15.0" fill="rgb(225,45,8)" rx="2" ry="2" />
+<text  x="1119.65" y="287.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (56 samples, 0.04%)</title><rect x="1120.8" y="357" width="0.5" height="15.0" fill="rgb(238,193,36)" rx="2" ry="2" />
+<text  x="1123.78" y="367.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (16 samples, 0.01%)</title><rect x="1189.8" y="501" width="0.1" height="15.0" fill="rgb(224,72,27)" rx="2" ry="2" />
+<text  x="1192.78" y="511.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (34 samples, 0.03%)</title><rect x="642.8" y="645" width="0.3" height="15.0" fill="rgb(206,26,20)" rx="2" ry="2" />
+<text  x="645.80" y="655.5" ></text>
+</g>
+<g >
+<title>Some binary code (25 samples, 0.02%)</title><rect x="644.5" y="693" width="0.2" height="15.0" fill="rgb(209,26,2)" rx="2" ry="2" />
+<text  x="647.52" y="703.5" ></text>
+</g>
+<g >
+<title>COLUMN-HEIGHT (1,297 samples, 0.96%)</title><rect x="633.2" y="693" width="11.3" height="15.0" fill="rgb(222,168,36)" rx="2" ry="2" />
+<text  x="636.18" y="703.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (430 samples, 0.32%)</title><rect x="1155.8" y="645" width="3.8" height="15.0" fill="rgb(229,45,13)" rx="2" ry="2" />
+<text  x="1158.80" y="655.5" ></text>
+</g>
+<g >
+<title>ASH (52 samples, 0.04%)</title><rect x="1174.0" y="645" width="0.4" height="15.0" fill="rgb(246,160,35)" rx="2" ry="2" />
+<text  x="1176.97" y="655.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (200 samples, 0.15%)</title><rect x="1141.4" y="549" width="1.7" height="15.0" fill="rgb(250,12,51)" rx="2" ry="2" />
+<text  x="1144.39" y="559.5" ></text>
+</g>
+<g >
+<title>foreign function interrupt_handle_pending (20 samples, 0.01%)</title><rect x="1182.3" y="645" width="0.2" height="15.0" fill="rgb(218,45,10)" rx="2" ry="2" />
+<text  x="1185.31" y="655.5" ></text>
+</g>
+<g >
+<title>ARRAY-TOTAL-SIZE (19 samples, 0.01%)</title><rect x="883.5" y="661" width="0.2" height="15.0" fill="rgb(215,29,46)" rx="2" ry="2" />
+<text  x="886.53" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (38 samples, 0.03%)</title><rect x="1189.7" y="645" width="0.3" height="15.0" fill="rgb(250,216,45)" rx="2" ry="2" />
+<text  x="1192.65" y="655.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (21 samples, 0.02%)</title><rect x="1189.7" y="581" width="0.2" height="15.0" fill="rgb(230,181,45)" rx="2" ry="2" />
+<text  x="1192.74" y="591.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (124 samples, 0.09%)</title><rect x="1187.6" y="613" width="1.1" height="15.0" fill="rgb(231,217,48)" rx="2" ry="2" />
+<text  x="1190.57" y="623.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (20 samples, 0.01%)</title><rect x="1188.3" y="293" width="0.2" height="15.0" fill="rgb(218,198,52)" rx="2" ry="2" />
+<text  x="1191.28" y="303.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (131 samples, 0.10%)</title><rect x="1109.7" y="133" width="1.2" height="15.0" fill="rgb(248,38,25)" rx="2" ry="2" />
+<text  x="1112.75" y="143.5" ></text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (23 samples, 0.02%)</title><rect x="540.7" y="645" width="0.2" height="15.0" fill="rgb(207,15,30)" rx="2" ry="2" />
+<text  x="543.70" y="655.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (22,038 samples, 16.34%)</title><rect x="959.8" y="629" width="192.8" height="15.0" fill="rgb(218,208,44)" rx="2" ry="2" />
+<text  x="962.81" y="639.5" >ADD-IF-UNIQUE</text>
+</g>
+<g >
+<title>COPY-ARRAY (390 samples, 0.29%)</title><rect x="897.1" y="645" width="3.4" height="15.0" fill="rgb(233,197,39)" rx="2" ry="2" />
+<text  x="900.09" y="655.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (126 samples, 0.09%)</title><rect x="1136.7" y="517" width="1.1" height="15.0" fill="rgb(212,156,6)" rx="2" ry="2" />
+<text  x="1139.73" y="527.5" ></text>
+</g>
+<g >
+<title>ADJUSTED-PIECE (1,611 samples, 1.19%)</title><rect x="842.3" y="677" width="14.1" height="15.0" fill="rgb(211,134,11)" rx="2" ry="2" />
+<text  x="845.32" y="687.5" ></text>
+</g>
+<g >
+<title>EQUALP (25 samples, 0.02%)</title><rect x="1142.9" y="501" width="0.2" height="15.0" fill="rgb(227,220,37)" rx="2" ry="2" />
+<text  x="1145.86" y="511.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (5,237 samples, 3.88%)</title><rect x="1077.1" y="421" width="45.8" height="15.0" fill="rgb(207,219,38)" rx="2" ry="2" />
+<text  x="1080.08" y="431.5" >ADD-..</text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (63 samples, 0.05%)</title><rect x="1117.9" y="325" width="0.6" height="15.0" fill="rgb(218,194,13)" rx="2" ry="2" />
+<text  x="1120.91" y="335.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (4,036 samples, 2.99%)</title><rect x="1085.0" y="389" width="35.3" height="15.0" fill="rgb(219,78,26)" rx="2" ry="2" />
+<text  x="1088.02" y="399.5" >AD..</text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (32 samples, 0.02%)</title><rect x="627.9" y="645" width="0.2" height="15.0" fill="rgb(207,161,26)" rx="2" ry="2" />
+<text  x="630.87" y="655.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (78 samples, 0.06%)</title><rect x="1113.5" y="245" width="0.7" height="15.0" fill="rgb(218,114,43)" rx="2" ry="2" />
+<text  x="1116.53" y="255.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (1,999 samples, 1.48%)</title><rect x="1098.9" y="309" width="17.5" height="15.0" fill="rgb(210,149,13)" rx="2" ry="2" />
+<text  x="1101.91" y="319.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (261 samples, 0.19%)</title><rect x="1138.2" y="549" width="2.3" height="15.0" fill="rgb(222,48,12)" rx="2" ry="2" />
+<text  x="1141.19" y="559.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;CLEANUP-FUN-70&quot; :IN SB-THREAD::CALL-WITH-RECURSIVE-SYSTEM-LOCK) (86 samples, 0.06%)</title><rect x="838.1" y="629" width="0.8" height="15.0" fill="rgb(213,21,49)" rx="2" ry="2" />
+<text  x="841.15" y="639.5" ></text>
+</g>
+<g >
+<title>FIND (84 samples, 0.06%)</title><rect x="1151.4" y="565" width="0.8" height="15.0" fill="rgb(218,60,45)" rx="2" ry="2" />
+<text  x="1154.44" y="575.5" ></text>
+</g>
+<g >
+<title>QUEUE-POP (205 samples, 0.15%)</title><rect x="906.4" y="677" width="1.8" height="15.0" fill="rgb(221,109,9)" rx="2" ry="2" />
+<text  x="909.39" y="687.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (38 samples, 0.03%)</title><rect x="642.5" y="645" width="0.3" height="15.0" fill="rgb(216,174,52)" rx="2" ry="2" />
+<text  x="645.47" y="655.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (343 samples, 0.25%)</title><rect x="1149.5" y="613" width="3.0" height="15.0" fill="rgb(224,229,27)" rx="2" ry="2" />
+<text  x="1152.53" y="623.5" ></text>
+</g>
+<g >
+<title>POSSIBLE-NEXT-STATES (67 samples, 0.05%)</title><rect x="1189.4" y="757" width="0.6" height="15.0" fill="rgb(219,94,45)" rx="2" ry="2" />
+<text  x="1192.41" y="767.5" ></text>
+</g>
+<g >
+<title>EQUALP (25 samples, 0.02%)</title><rect x="1151.9" y="549" width="0.2" height="15.0" fill="rgb(209,136,19)" rx="2" ry="2" />
+<text  x="1154.91" y="559.5" ></text>
+</g>
+<g >
+<title>OUTSIDE-WELL-P (19 samples, 0.01%)</title><rect x="1178.3" y="645" width="0.1" height="15.0" fill="rgb(217,90,50)" rx="2" ry="2" />
+<text  x="1181.28" y="655.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (15 samples, 0.01%)</title><rect x="894.7" y="629" width="0.1" height="15.0" fill="rgb(229,32,43)" rx="2" ry="2" />
+<text  x="897.69" y="639.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (18,132 samples, 13.44%)</title><rect x="988.0" y="597" width="158.6" height="15.0" fill="rgb(205,116,1)" rx="2" ry="2" />
+<text  x="990.97" y="607.5" >ADD-IF-UNIQUE</text>
+</g>
+<g >
+<title>NEXT-ORIENTATION (241 samples, 0.18%)</title><rect x="904.0" y="661" width="2.1" height="15.0" fill="rgb(226,99,7)" rx="2" ry="2" />
+<text  x="907.00" y="671.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (185 samples, 0.14%)</title><rect x="1144.5" y="565" width="1.7" height="15.0" fill="rgb(247,188,9)" rx="2" ry="2" />
+<text  x="1147.54" y="575.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (12 samples, 0.01%)</title><rect x="1189.8" y="437" width="0.1" height="15.0" fill="rgb(240,110,25)" rx="2" ry="2" />
+<text  x="1192.82" y="447.5" ></text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-REF/CHECK-BOUNDS (18 samples, 0.01%)</title><rect x="541.3" y="677" width="0.2" height="15.0" fill="rgb(243,216,37)" rx="2" ry="2" />
+<text  x="544.31" y="687.5" ></text>
+</g>
+<g >
+<title>FIND (26 samples, 0.02%)</title><rect x="1119.2" y="309" width="0.2" height="15.0" fill="rgb(218,125,11)" rx="2" ry="2" />
+<text  x="1122.18" y="319.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (30 samples, 0.02%)</title><rect x="1112.6" y="197" width="0.3" height="15.0" fill="rgb(249,187,11)" rx="2" ry="2" />
+<text  x="1115.63" y="207.5" ></text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-REF/CHECK-BOUNDS (48 samples, 0.04%)</title><rect x="1174.4" y="645" width="0.4" height="15.0" fill="rgb(207,48,39)" rx="2" ry="2" />
+<text  x="1177.42" y="655.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (103 samples, 0.08%)</title><rect x="1132.2" y="469" width="0.9" height="15.0" fill="rgb(221,33,32)" rx="2" ry="2" />
+<text  x="1135.24" y="479.5" ></text>
+</g>
+<g >
+<title>FIND (33 samples, 0.02%)</title><rect x="1126.3" y="405" width="0.3" height="15.0" fill="rgb(242,166,15)" rx="2" ry="2" />
+<text  x="1129.33" y="415.5" ></text>
+</g>
+<g >
+<title>TOWER-HEIGHT (248 samples, 0.18%)</title><rect x="774.7" y="629" width="2.2" height="15.0" fill="rgb(211,13,48)" rx="2" ry="2" />
+<text  x="777.68" y="639.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (45 samples, 0.03%)</title><rect x="1113.7" y="229" width="0.4" height="15.0" fill="rgb(219,124,47)" rx="2" ry="2" />
+<text  x="1116.72" y="239.5" ></text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-REF/CHECK-BOUNDS (50 samples, 0.04%)</title><rect x="643.7" y="645" width="0.4" height="15.0" fill="rgb(220,75,8)" rx="2" ry="2" />
+<text  x="646.66" y="655.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (36 samples, 0.03%)</title><rect x="907.5" y="661" width="0.3" height="15.0" fill="rgb(249,216,41)" rx="2" ry="2" />
+<text  x="910.50" y="671.5" ></text>
+</g>
+<g >
+<title>EQUALP (12 samples, 0.01%)</title><rect x="1114.0" y="181" width="0.1" height="15.0" fill="rgb(215,4,49)" rx="2" ry="2" />
+<text  x="1117.01" y="191.5" ></text>
+</g>
+<g >
+<title>POSSIBLE-NEXT-STATES (60,199 samples, 44.62%)</title><rect x="656.1" y="725" width="526.6" height="15.0" fill="rgb(237,23,52)" rx="2" ry="2" />
+<text  x="659.12" y="735.5" >POSSIBLE-NEXT-STATES</text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (24 samples, 0.02%)</title><rect x="1130.9" y="469" width="0.3" height="15.0" fill="rgb(248,228,51)" rx="2" ry="2" />
+<text  x="1133.94" y="479.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (63 samples, 0.05%)</title><rect x="1122.1" y="373" width="0.5" height="15.0" fill="rgb(226,61,24)" rx="2" ry="2" />
+<text  x="1125.10" y="383.5" ></text>
+</g>
+<g >
+<title>TWO-ARG-AND (28 samples, 0.02%)</title><rect x="644.1" y="645" width="0.2" height="15.0" fill="rgb(250,197,43)" rx="2" ry="2" />
+<text  x="647.09" y="655.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (216 samples, 0.16%)</title><rect x="1157.0" y="629" width="1.9" height="15.0" fill="rgb(207,138,5)" rx="2" ry="2" />
+<text  x="1159.99" y="639.5" ></text>
+</g>
+<g >
+<title>FIND (22 samples, 0.02%)</title><rect x="1113.3" y="181" width="0.2" height="15.0" fill="rgb(249,78,33)" rx="2" ry="2" />
+<text  x="1116.29" y="191.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (14,714 samples, 10.91%)</title><rect x="1011.8" y="565" width="128.7" height="15.0" fill="rgb(231,176,7)" rx="2" ry="2" />
+<text  x="1014.78" y="575.5" >ADD-IF-UNIQUE</text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (35 samples, 0.03%)</title><rect x="1189.7" y="629" width="0.3" height="15.0" fill="rgb(209,203,20)" rx="2" ry="2" />
+<text  x="1192.68" y="639.5" ></text>
+</g>
+<g >
+<title>FIND (12 samples, 0.01%)</title><rect x="1112.8" y="165" width="0.1" height="15.0" fill="rgb(214,201,14)" rx="2" ry="2" />
+<text  x="1115.78" y="175.5" ></text>
+</g>
+<g >
+<title>FULL-SQUARE-P (319 samples, 0.24%)</title><rect x="536.5" y="677" width="2.8" height="15.0" fill="rgb(214,135,20)" rx="2" ry="2" />
+<text  x="539.50" y="687.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (191 samples, 0.14%)</title><rect x="1153.6" y="613" width="1.6" height="15.0" fill="rgb(242,168,17)" rx="2" ry="2" />
+<text  x="1156.58" y="623.5" ></text>
+</g>
+<g >
+<title>COLUMN-HEIGHT (743 samples, 0.55%)</title><rect x="507.4" y="693" width="6.5" height="15.0" fill="rgb(245,45,9)" rx="2" ry="2" />
+<text  x="510.38" y="703.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (41 samples, 0.03%)</title><rect x="1114.6" y="229" width="0.3" height="15.0" fill="rgb(252,178,3)" rx="2" ry="2" />
+<text  x="1117.56" y="239.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (99 samples, 0.07%)</title><rect x="1124.4" y="421" width="0.8" height="15.0" fill="rgb(228,47,13)" rx="2" ry="2" />
+<text  x="1127.36" y="431.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (29 samples, 0.02%)</title><rect x="1111.1" y="149" width="0.2" height="15.0" fill="rgb(215,85,49)" rx="2" ry="2" />
+<text  x="1114.09" y="159.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1.) :IN &quot;SYS:SRC (12 samples, 0.01%)</title><rect x="907.4" y="661" width="0.1" height="15.0" fill="rgb(222,49,8)" rx="2" ry="2" />
+<text  x="910.40" y="671.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (56 samples, 0.04%)</title><rect x="1126.1" y="421" width="0.5" height="15.0" fill="rgb(227,58,8)" rx="2" ry="2" />
+<text  x="1129.13" y="431.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (13 samples, 0.01%)</title><rect x="1111.5" y="133" width="0.1" height="15.0" fill="rgb(251,26,29)" rx="2" ry="2" />
+<text  x="1114.46" y="143.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (33 samples, 0.02%)</title><rect x="538.2" y="661" width="0.2" height="15.0" fill="rgb(206,77,21)" rx="2" ry="2" />
+<text  x="541.15" y="671.5" ></text>
+</g>
+<g >
+<title>COPY-STRUCTURE (112 samples, 0.08%)</title><rect x="848.2" y="661" width="1.0" height="15.0" fill="rgb(230,18,52)" rx="2" ry="2" />
+<text  x="851.20" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (2,673 samples, 1.98%)</title><rect x="1094.2" y="341" width="23.4" height="15.0" fill="rgb(229,42,0)" rx="2" ry="2" />
+<text  x="1097.24" y="351.5" >A..</text>
+</g>
+<g >
+<title>FULL-SQUARE-P (323 samples, 0.24%)</title><rect x="650.8" y="677" width="2.8" height="15.0" fill="rgb(218,79,4)" rx="2" ry="2" />
+<text  x="653.76" y="687.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (77 samples, 0.06%)</title><rect x="1116.9" y="325" width="0.7" height="15.0" fill="rgb(208,163,29)" rx="2" ry="2" />
+<text  x="1119.95" y="335.5" ></text>
+</g>
+<g >
+<title>FIND (14 samples, 0.01%)</title><rect x="1115.4" y="229" width="0.1" height="15.0" fill="rgb(228,32,51)" rx="2" ry="2" />
+<text  x="1118.37" y="239.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (45 samples, 0.03%)</title><rect x="1123.4" y="389" width="0.4" height="15.0" fill="rgb(253,95,25)" rx="2" ry="2" />
+<text  x="1126.38" y="399.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (17 samples, 0.01%)</title><rect x="1189.8" y="517" width="0.1" height="15.0" fill="rgb(211,108,35)" rx="2" ry="2" />
+<text  x="1192.77" y="527.5" ></text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-REF (21 samples, 0.02%)</title><rect x="899.8" y="629" width="0.2" height="15.0" fill="rgb(211,192,6)" rx="2" ry="2" />
+<text  x="902.77" y="639.5" ></text>
+</g>
+<g >
+<title>FULL-SQUARE-P (289 samples, 0.21%)</title><rect x="511.3" y="661" width="2.5" height="15.0" fill="rgb(205,36,46)" rx="2" ry="2" />
+<text  x="514.29" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (28 samples, 0.02%)</title><rect x="1110.2" y="69" width="0.2" height="15.0" fill="rgb(246,98,27)" rx="2" ry="2" />
+<text  x="1113.20" y="79.5" ></text>
+</g>
+<g >
+<title>FIND (37 samples, 0.03%)</title><rect x="1122.3" y="357" width="0.3" height="15.0" fill="rgb(243,65,36)" rx="2" ry="2" />
+<text  x="1125.33" y="367.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (20 samples, 0.01%)</title><rect x="1110.6" y="85" width="0.2" height="15.0" fill="rgb(217,190,25)" rx="2" ry="2" />
+<text  x="1113.61" y="95.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (63 samples, 0.05%)</title><rect x="1123.2" y="405" width="0.6" height="15.0" fill="rgb(206,7,52)" rx="2" ry="2" />
+<text  x="1126.22" y="415.5" ></text>
+</g>
+<g >
+<title>all (134,906 samples, 100%)</title><rect x="10.0" y="853" width="1180.0" height="15.0" fill="rgb(216,76,6)" rx="2" ry="2" />
+<text  x="13.00" y="863.5" ></text>
+</g>
+<g >
+<title>DLISP3.LISP&quot;) (36 samples, 0.03%)</title><rect x="907.5" y="629" width="0.3" height="15.0" fill="rgb(244,130,47)" rx="2" ry="2" />
+<text  x="910.50" y="639.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (64 samples, 0.05%)</title><rect x="1111.9" y="197" width="0.6" height="15.0" fill="rgb(253,18,51)" rx="2" ry="2" />
+<text  x="1114.93" y="207.5" ></text>
+</g>
+<g >
+<title>(LABELS SB-IMPL::SXHASH-RECURSE :IN SXHASH) (42 samples, 0.03%)</title><rect x="841.4" y="581" width="0.3" height="15.0" fill="rgb(225,17,1)" rx="2" ry="2" />
+<text  x="844.36" y="591.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (62 samples, 0.05%)</title><rect x="1118.9" y="341" width="0.5" height="15.0" fill="rgb(224,16,2)" rx="2" ry="2" />
+<text  x="1121.86" y="351.5" ></text>
+</g>
+<g >
+<title>EQUALP (19 samples, 0.01%)</title><rect x="1140.0" y="485" width="0.1" height="15.0" fill="rgb(233,87,8)" rx="2" ry="2" />
+<text  x="1142.95" y="495.5" ></text>
+</g>
+<g >
+<title>BUMPINESS (1,887 samples, 1.40%)</title><rect x="514.0" y="709" width="16.6" height="15.0" fill="rgb(229,168,33)" rx="2" ry="2" />
+<text  x="517.04" y="719.5" ></text>
+</g>
+<g >
+<title>(LABELS SB-IMPL::EQUAL-AUX :IN EQUAL) (90 samples, 0.07%)</title><rect x="868.1" y="645" width="0.8" height="15.0" fill="rgb(251,159,30)" rx="2" ry="2" />
+<text  x="871.11" y="655.5" ></text>
+</g>
+<g >
+<title>MERGE-PIECE (1,513 samples, 1.12%)</title><rect x="888.2" y="677" width="13.3" height="15.0" fill="rgb(213,123,53)" rx="2" ry="2" />
+<text  x="891.24" y="687.5" ></text>
+</g>
+<g >
+<title>Some binary code (22 samples, 0.02%)</title><rect x="1161.0" y="677" width="0.2" height="15.0" fill="rgb(239,221,13)" rx="2" ry="2" />
+<text  x="1163.96" y="687.5" ></text>
+</g>
+<g >
+<title>FULL-SQUARE-P (527 samples, 0.39%)</title><rect x="525.6" y="661" width="4.6" height="15.0" fill="rgb(228,151,23)" rx="2" ry="2" />
+<text  x="528.59" y="671.5" ></text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-REF/CHECK-BOUNDS (48 samples, 0.04%)</title><rect x="529.5" y="645" width="0.4" height="15.0" fill="rgb(228,188,41)" rx="2" ry="2" />
+<text  x="532.51" y="655.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (739 samples, 0.55%)</title><rect x="1106.5" y="229" width="6.4" height="15.0" fill="rgb(253,3,36)" rx="2" ry="2" />
+<text  x="1109.49" y="239.5" ></text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (16 samples, 0.01%)</title><rect x="512.8" y="613" width="0.1" height="15.0" fill="rgb(217,51,23)" rx="2" ry="2" />
+<text  x="515.76" y="623.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (21 samples, 0.02%)</title><rect x="1110.9" y="133" width="0.2" height="15.0" fill="rgb(217,24,26)" rx="2" ry="2" />
+<text  x="1113.89" y="143.5" ></text>
+</g>
+<g >
+<title>FIND (83 samples, 0.06%)</title><rect x="1154.5" y="581" width="0.7" height="15.0" fill="rgb(233,113,24)" rx="2" ry="2" />
+<text  x="1157.52" y="591.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (23 samples, 0.02%)</title><rect x="540.7" y="677" width="0.2" height="15.0" fill="rgb(212,85,49)" rx="2" ry="2" />
+<text  x="543.70" y="687.5" ></text>
+</g>
+<g >
+<title>FIND (63 samples, 0.05%)</title><rect x="1132.6" y="453" width="0.5" height="15.0" fill="rgb(247,0,26)" rx="2" ry="2" />
+<text  x="1135.59" y="463.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (583 samples, 0.43%)</title><rect x="1107.4" y="213" width="5.1" height="15.0" fill="rgb(227,93,4)" rx="2" ry="2" />
+<text  x="1110.39" y="223.5" ></text>
+</g>
+<g >
+<title>REMOVE-DUPLICATE-POSITIONS (28,565 samples, 21.17%)</title><rect x="909.7" y="677" width="249.9" height="15.0" fill="rgb(215,79,38)" rx="2" ry="2" />
+<text  x="912.72" y="687.5" >REMOVE-DUPLICATE-POSITIONS</text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (175 samples, 0.13%)</title><rect x="1187.3" y="645" width="1.5" height="15.0" fill="rgb(218,177,52)" rx="2" ry="2" />
+<text  x="1190.31" y="655.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (15 samples, 0.01%)</title><rect x="1189.8" y="485" width="0.1" height="15.0" fill="rgb(224,114,25)" rx="2" ry="2" />
+<text  x="1192.79" y="495.5" ></text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (37 samples, 0.03%)</title><rect x="1179.1" y="597" width="0.3" height="15.0" fill="rgb(221,166,52)" rx="2" ry="2" />
+<text  x="1182.12" y="607.5" ></text>
+</g>
+<g >
+<title>EQUAL-HASH (1,198 samples, 0.89%)</title><rect x="869.0" y="645" width="10.4" height="15.0" fill="rgb(205,38,31)" rx="2" ry="2" />
+<text  x="871.97" y="655.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (42 samples, 0.03%)</title><rect x="1149.0" y="581" width="0.4" height="15.0" fill="rgb(220,44,43)" rx="2" ry="2" />
+<text  x="1152.04" y="591.5" ></text>
+</g>
+<g >
+<title>EQUALP (19 samples, 0.01%)</title><rect x="1132.9" y="437" width="0.2" height="15.0" fill="rgb(240,5,24)" rx="2" ry="2" />
+<text  x="1135.93" y="447.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (12 samples, 0.01%)</title><rect x="1188.7" y="629" width="0.1" height="15.0" fill="rgb(243,200,48)" rx="2" ry="2" />
+<text  x="1191.73" y="639.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (27 samples, 0.02%)</title><rect x="1126.6" y="437" width="0.3" height="15.0" fill="rgb(242,97,32)" rx="2" ry="2" />
+<text  x="1129.63" y="447.5" ></text>
+</g>
+<g >
+<title>GENERATE-CHILDREN! (716 samples, 0.53%)</title><rect x="1182.9" y="757" width="6.3" height="15.0" fill="rgb(239,13,12)" rx="2" ry="2" />
+<text  x="1185.92" y="767.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (40 samples, 0.03%)</title><rect x="1143.1" y="549" width="0.4" height="15.0" fill="rgb(251,116,49)" rx="2" ry="2" />
+<text  x="1146.14" y="559.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (38 samples, 0.03%)</title><rect x="1111.6" y="181" width="0.3" height="15.0" fill="rgb(217,226,41)" rx="2" ry="2" />
+<text  x="1114.59" y="191.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (12 samples, 0.01%)</title><rect x="1188.3" y="229" width="0.2" height="15.0" fill="rgb(217,178,16)" rx="2" ry="2" />
+<text  x="1191.35" y="239.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (25 samples, 0.02%)</title><rect x="652.7" y="661" width="0.2" height="15.0" fill="rgb(217,0,19)" rx="2" ry="2" />
+<text  x="655.70" y="671.5" ></text>
+</g>
+<g >
+<title>(SETF PIECE-X) (23 samples, 0.02%)</title><rect x="853.3" y="645" width="0.2" height="15.0" fill="rgb(241,166,25)" rx="2" ry="2" />
+<text  x="856.33" y="655.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (146 samples, 0.11%)</title><rect x="1131.9" y="485" width="1.3" height="15.0" fill="rgb(242,93,13)" rx="2" ry="2" />
+<text  x="1134.88" y="495.5" ></text>
+</g>
+<g >
+<title>foreign function handle_trap (30 samples, 0.02%)</title><rect x="1182.2" y="661" width="0.3" height="15.0" fill="rgb(209,121,1)" rx="2" ry="2" />
+<text  x="1185.22" y="671.5" ></text>
+</g>
+<g >
+<title>COLUMN-HEIGHT (1,397 samples, 1.04%)</title><rect x="518.2" y="693" width="12.2" height="15.0" fill="rgb(230,51,37)" rx="2" ry="2" />
+<text  x="521.21" y="703.5" ></text>
+</g>
+<g >
+<title>SXHASH (12 samples, 0.01%)</title><rect x="879.1" y="581" width="0.2" height="15.0" fill="rgb(247,7,7)" rx="2" ry="2" />
+<text  x="882.15" y="591.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (16 samples, 0.01%)</title><rect x="1188.3" y="261" width="0.2" height="15.0" fill="rgb(216,139,1)" rx="2" ry="2" />
+<text  x="1191.31" y="271.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (22 samples, 0.02%)</title><rect x="540.9" y="677" width="0.2" height="15.0" fill="rgb(243,98,24)" rx="2" ry="2" />
+<text  x="543.90" y="687.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (37 samples, 0.03%)</title><rect x="1173.3" y="645" width="0.3" height="15.0" fill="rgb(224,192,51)" rx="2" ry="2" />
+<text  x="1176.30" y="655.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (18 samples, 0.01%)</title><rect x="1122.7" y="389" width="0.1" height="15.0" fill="rgb(235,140,38)" rx="2" ry="2" />
+<text  x="1125.66" y="399.5" ></text>
+</g>
+<g >
+<title>(SETF PIECE-Y) (19 samples, 0.01%)</title><rect x="853.5" y="645" width="0.2" height="15.0" fill="rgb(226,205,44)" rx="2" ry="2" />
+<text  x="856.54" y="655.5" ></text>
+</g>
+<g >
+<title>VALID-WRAPPER-OF (21 samples, 0.02%)</title><rect x="856.2" y="645" width="0.2" height="15.0" fill="rgb(237,50,54)" rx="2" ry="2" />
+<text  x="859.17" y="655.5" ></text>
+</g>
+<g >
+<title>ROW-EMPTY-P (60 samples, 0.04%)</title><rect x="893.5" y="645" width="0.5" height="15.0" fill="rgb(248,13,49)" rx="2" ry="2" />
+<text  x="896.48" y="655.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (34 samples, 0.03%)</title><rect x="1113.8" y="213" width="0.3" height="15.0" fill="rgb(218,27,53)" rx="2" ry="2" />
+<text  x="1116.82" y="223.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (22 samples, 0.02%)</title><rect x="1111.7" y="165" width="0.2" height="15.0" fill="rgb(228,29,17)" rx="2" ry="2" />
+<text  x="1114.69" y="175.5" ></text>
+</g>
+<g >
+<title>PIECE-KEY (55 samples, 0.04%)</title><rect x="1160.4" y="661" width="0.5" height="15.0" fill="rgb(225,216,5)" rx="2" ry="2" />
+<text  x="1163.39" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (41 samples, 0.03%)</title><rect x="1189.6" y="661" width="0.4" height="15.0" fill="rgb(205,54,18)" rx="2" ry="2" />
+<text  x="1192.62" y="671.5" ></text>
+</g>
+<g >
+<title>GET-ORIENTATIONS (15 samples, 0.01%)</title><rect x="905.2" y="645" width="0.2" height="15.0" fill="rgb(241,93,9)" rx="2" ry="2" />
+<text  x="908.23" y="655.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (28 samples, 0.02%)</title><rect x="885.5" y="645" width="0.3" height="15.0" fill="rgb(247,215,45)" rx="2" ry="2" />
+<text  x="888.55" y="655.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (39 samples, 0.03%)</title><rect x="1135.6" y="501" width="0.4" height="15.0" fill="rgb(243,92,44)" rx="2" ry="2" />
+<text  x="1138.64" y="511.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (44 samples, 0.03%)</title><rect x="1188.1" y="437" width="0.4" height="15.0" fill="rgb(207,41,50)" rx="2" ry="2" />
+<text  x="1191.08" y="447.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (32 samples, 0.02%)</title><rect x="1152.2" y="597" width="0.2" height="15.0" fill="rgb(231,42,20)" rx="2" ry="2" />
+<text  x="1155.17" y="607.5" ></text>
+</g>
+<g >
+<title>FULL-SQUARE-P (522 samples, 0.39%)</title><rect x="1170.5" y="661" width="4.6" height="15.0" fill="rgb(224,216,40)" rx="2" ry="2" />
+<text  x="1173.54" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (6,638 samples, 4.92%)</title><rect x="1067.3" y="453" width="58.1" height="15.0" fill="rgb(209,161,10)" rx="2" ry="2" />
+<text  x="1070.33" y="463.5" >ADD-IF..</text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (355 samples, 0.26%)</title><rect x="1140.5" y="565" width="3.1" height="15.0" fill="rgb(231,90,50)" rx="2" ry="2" />
+<text  x="1143.48" y="575.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (18 samples, 0.01%)</title><rect x="1188.3" y="277" width="0.2" height="15.0" fill="rgb(214,132,16)" rx="2" ry="2" />
+<text  x="1191.29" y="287.5" ></text>
+</g>
+<g >
+<title>SEEN-P (151 samples, 0.11%)</title><rect x="1159.6" y="677" width="1.3" height="15.0" fill="rgb(248,215,49)" rx="2" ry="2" />
+<text  x="1162.60" y="687.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (105 samples, 0.08%)</title><rect x="1134.7" y="485" width="0.9" height="15.0" fill="rgb(240,48,29)" rx="2" ry="2" />
+<text  x="1137.71" y="495.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (56 samples, 0.04%)</title><rect x="1110.1" y="101" width="0.5" height="15.0" fill="rgb(209,24,12)" rx="2" ry="2" />
+<text  x="1113.06" y="111.5" ></text>
+</g>
+<g >
+<title>(FLET ALEXANDRIA.1.0.0::REDUCE-KEYS :IN ALEXANDRIA.1.0.0:EXTREMUM) (489 samples, 0.36%)</title><rect x="772.6" y="661" width="4.3" height="15.0" fill="rgb(223,45,23)" rx="2" ry="2" />
+<text  x="775.58" y="671.5" ></text>
+</g>
+<g >
+<title>ASH (40 samples, 0.03%)</title><rect x="886.0" y="645" width="0.3" height="15.0" fill="rgb(217,7,13)" rx="2" ry="2" />
+<text  x="888.99" y="655.5" ></text>
+</g>
+<g >
+<title>TWO-ARG-AND (31 samples, 0.02%)</title><rect x="529.9" y="645" width="0.3" height="15.0" fill="rgb(247,145,42)" rx="2" ry="2" />
+<text  x="532.93" y="655.5" ></text>
+</g>
+<g >
+<title>FIND (16 samples, 0.01%)</title><rect x="1117.3" y="277" width="0.2" height="15.0" fill="rgb(254,80,2)" rx="2" ry="2" />
+<text  x="1120.34" y="287.5" ></text>
+</g>
+<g >
+<title>FIND (18 samples, 0.01%)</title><rect x="1116.2" y="245" width="0.1" height="15.0" fill="rgb(206,112,21)" rx="2" ry="2" />
+<text  x="1119.16" y="255.5" ></text>
+</g>
+<g >
+<title>ASH (63 samples, 0.05%)</title><rect x="643.1" y="645" width="0.5" height="15.0" fill="rgb(235,100,31)" rx="2" ry="2" />
+<text  x="646.10" y="655.5" ></text>
+</g>
+<g >
+<title>FIND (28 samples, 0.02%)</title><rect x="1123.5" y="373" width="0.3" height="15.0" fill="rgb(215,60,12)" rx="2" ry="2" />
+<text  x="1126.52" y="383.5" ></text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (32 samples, 0.02%)</title><rect x="627.9" y="613" width="0.2" height="15.0" fill="rgb(239,75,24)" rx="2" ry="2" />
+<text  x="630.87" y="623.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (241 samples, 0.18%)</title><rect x="1136.1" y="533" width="2.1" height="15.0" fill="rgb(211,11,15)" rx="2" ry="2" />
+<text  x="1139.07" y="543.5" ></text>
+</g>
+<g >
+<title>Some binary code (13 samples, 0.01%)</title><rect x="629.1" y="693" width="0.1" height="15.0" fill="rgb(226,34,21)" rx="2" ry="2" />
+<text  x="632.10" y="703.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (22 samples, 0.02%)</title><rect x="628.1" y="645" width="0.2" height="15.0" fill="rgb(246,221,13)" rx="2" ry="2" />
+<text  x="631.15" y="655.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (1,149 samples, 0.85%)</title><rect x="1104.2" y="261" width="10.0" height="15.0" fill="rgb(243,160,49)" rx="2" ry="2" />
+<text  x="1107.16" y="271.5" ></text>
+</g>
+<g >
+<title>FIND (75 samples, 0.06%)</title><rect x="1130.3" y="437" width="0.6" height="15.0" fill="rgb(236,120,3)" rx="2" ry="2" />
+<text  x="1133.28" y="447.5" ></text>
+</g>
+<g >
+<title>REMOVE-DUPLICATE-POSITIONS (55 samples, 0.04%)</title><rect x="1189.5" y="709" width="0.5" height="15.0" fill="rgb(209,188,53)" rx="2" ry="2" />
+<text  x="1192.52" y="719.5" ></text>
+</g>
+<g >
+<title>PIECE-LEFT (43 samples, 0.03%)</title><rect x="901.7" y="677" width="0.4" height="15.0" fill="rgb(205,86,12)" rx="2" ry="2" />
+<text  x="904.70" y="687.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1.) :IN &quot;SYS:SRC (15 samples, 0.01%)</title><rect x="909.1" y="661" width="0.1" height="15.0" fill="rgb(209,76,14)" rx="2" ry="2" />
+<text  x="912.07" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (7,459 samples, 5.53%)</title><rect x="1061.7" y="469" width="65.2" height="15.0" fill="rgb(247,189,21)" rx="2" ry="2" />
+<text  x="1064.68" y="479.5" >ADD-IF-..</text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (269 samples, 0.20%)</title><rect x="1131.2" y="501" width="2.3" height="15.0" fill="rgb(234,154,1)" rx="2" ry="2" />
+<text  x="1134.16" y="511.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (12 samples, 0.01%)</title><rect x="1110.3" y="37" width="0.1" height="15.0" fill="rgb(249,57,0)" rx="2" ry="2" />
+<text  x="1113.27" y="47.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (34 samples, 0.03%)</title><rect x="1117.2" y="309" width="0.3" height="15.0" fill="rgb(241,120,51)" rx="2" ry="2" />
+<text  x="1120.18" y="319.5" ></text>
+</g>
+<g >
+<title>VALID-POSITION-P (31 samples, 0.02%)</title><rect x="1188.9" y="693" width="0.3" height="15.0" fill="rgb(243,29,54)" rx="2" ry="2" />
+<text  x="1191.91" y="703.5" ></text>
+</g>
+<g >
+<title>FIND (65 samples, 0.05%)</title><rect x="1135.1" y="469" width="0.5" height="15.0" fill="rgb(213,167,29)" rx="2" ry="2" />
+<text  x="1138.06" y="479.5" ></text>
+</g>
+<g >
+<title>FIND (36 samples, 0.03%)</title><rect x="1121.0" y="341" width="0.3" height="15.0" fill="rgb(229,133,13)" rx="2" ry="2" />
+<text  x="1123.95" y="351.5" ></text>
+</g>
+<g >
+<title>PCL (37 samples, 0.03%)</title><rect x="1179.1" y="613" width="0.3" height="15.0" fill="rgb(216,101,11)" rx="2" ry="2" />
+<text  x="1182.12" y="623.5" ></text>
+</g>
+<g >
+<title>EQUALP (17 samples, 0.01%)</title><rect x="1128.3" y="405" width="0.1" height="15.0" fill="rgb(239,163,2)" rx="2" ry="2" />
+<text  x="1131.27" y="415.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (72 samples, 0.05%)</title><rect x="1124.6" y="405" width="0.6" height="15.0" fill="rgb(233,11,30)" rx="2" ry="2" />
+<text  x="1127.59" y="415.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (98 samples, 0.07%)</title><rect x="1187.7" y="581" width="0.9" height="15.0" fill="rgb(223,194,43)" rx="2" ry="2" />
+<text  x="1190.73" y="591.5" ></text>
+</g>
+<g >
+<title>AGGREGATE-HEIGHT (1,027 samples, 0.76%)</title><rect x="505.1" y="709" width="8.9" height="15.0" fill="rgb(236,38,39)" rx="2" ry="2" />
+<text  x="508.06" y="719.5" ></text>
+</g>
+<g >
+<title>EQUALP (28 samples, 0.02%)</title><rect x="1130.7" y="421" width="0.2" height="15.0" fill="rgb(217,34,50)" rx="2" ry="2" />
+<text  x="1133.65" y="431.5" ></text>
+</g>
+<g >
+<title>ASH (41 samples, 0.03%)</title><rect x="513.1" y="645" width="0.4" height="15.0" fill="rgb(209,97,11)" rx="2" ry="2" />
+<text  x="516.11" y="655.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (60 samples, 0.04%)</title><rect x="1158.9" y="629" width="0.5" height="15.0" fill="rgb(248,189,26)" rx="2" ry="2" />
+<text  x="1161.88" y="639.5" ></text>
+</g>
+<g >
+<title>PCL (16 samples, 0.01%)</title><rect x="512.8" y="629" width="0.1" height="15.0" fill="rgb(245,147,5)" rx="2" ry="2" />
+<text  x="515.76" y="639.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (11,940 samples, 8.85%)</title><rect x="1031.6" y="533" width="104.5" height="15.0" fill="rgb(250,35,50)" rx="2" ry="2" />
+<text  x="1034.63" y="543.5" >ADD-IF-UNIQUE</text>
+</g>
+<g >
+<title>PCL (18 samples, 0.01%)</title><rect x="888.0" y="629" width="0.1" height="15.0" fill="rgb(235,161,43)" rx="2" ry="2" />
+<text  x="890.96" y="639.5" ></text>
+</g>
+<g >
+<title>STABLE-SORT-LIST (23 samples, 0.02%)</title><rect x="1182.7" y="725" width="0.2" height="15.0" fill="rgb(245,110,30)" rx="2" ry="2" />
+<text  x="1185.67" y="735.5" ></text>
+</g>
+<g >
+<title>FULL-SQUARE-P (495 samples, 0.37%)</title><rect x="640.0" y="661" width="4.3" height="15.0" fill="rgb(208,85,3)" rx="2" ry="2" />
+<text  x="643.01" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (47 samples, 0.03%)</title><rect x="1188.1" y="453" width="0.4" height="15.0" fill="rgb(210,191,8)" rx="2" ry="2" />
+<text  x="1191.06" y="463.5" ></text>
+</g>
+<g >
+<title>SXHASH (15 samples, 0.01%)</title><rect x="879.3" y="613" width="0.1" height="15.0" fill="rgb(216,149,39)" rx="2" ry="2" />
+<text  x="882.31" y="623.5" ></text>
+</g>
+<g >
+<title>FIND (19 samples, 0.01%)</title><rect x="1112.3" y="149" width="0.1" height="15.0" fill="rgb(216,28,19)" rx="2" ry="2" />
+<text  x="1115.27" y="159.5" ></text>
+</g>
+<g >
+<title>EQUALP (17 samples, 0.01%)</title><rect x="1125.0" y="373" width="0.2" height="15.0" fill="rgb(241,35,45)" rx="2" ry="2" />
+<text  x="1128.05" y="383.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (926 samples, 0.69%)</title><rect x="1105.4" y="245" width="8.1" height="15.0" fill="rgb(222,79,31)" rx="2" ry="2" />
+<text  x="1108.43" y="255.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (STATE) :IN GET-HEURISTIC-EVAL) (5,313 samples, 3.94%)</title><rect x="609.6" y="725" width="46.5" height="15.0" fill="rgb(246,169,54)" rx="2" ry="2" />
+<text  x="612.65" y="735.5" >(LAM..</text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (17 samples, 0.01%)</title><rect x="776.3" y="565" width="0.1" height="15.0" fill="rgb(218,136,27)" rx="2" ry="2" />
+<text  x="779.26" y="575.5" ></text>
+</g>
+<g >
+<title>BUMPINESS (1,775 samples, 1.32%)</title><rect x="629.2" y="709" width="15.5" height="15.0" fill="rgb(215,213,5)" rx="2" ry="2" />
+<text  x="632.21" y="719.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (22 samples, 0.02%)</title><rect x="1115.3" y="245" width="0.2" height="15.0" fill="rgb(249,167,51)" rx="2" ry="2" />
+<text  x="1118.30" y="255.5" ></text>
+</g>
+<g >
+<title>LOCKABLE-P (992 samples, 0.74%)</title><rect x="879.5" y="677" width="8.7" height="15.0" fill="rgb(215,189,25)" rx="2" ry="2" />
+<text  x="882.50" y="687.5" ></text>
+</g>
+<g >
+<title>QUEUE-PUSH (175 samples, 0.13%)</title><rect x="908.2" y="677" width="1.5" height="15.0" fill="rgb(236,164,41)" rx="2" ry="2" />
+<text  x="911.19" y="687.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (16,376 samples, 12.14%)</title><rect x="1000.4" y="581" width="143.2" height="15.0" fill="rgb(236,114,5)" rx="2" ry="2" />
+<text  x="1003.39" y="591.5" >ADD-IF-UNIQUE</text>
+</g>
+<g >
+<title>(LABELS SB-IMPL::SXHASH-RECURSE :IN SXHASH) (615 samples, 0.46%)</title><rect x="873.9" y="613" width="5.4" height="15.0" fill="rgb(207,127,4)" rx="2" ry="2" />
+<text  x="876.93" y="623.5" ></text>
+</g>
+<g >
+<title>(LABELS SB-IMPL::SXHASH-RECURSE :IN SXHASH) (364 samples, 0.27%)</title><rect x="876.1" y="597" width="3.2" height="15.0" fill="rgb(231,69,42)" rx="2" ry="2" />
+<text  x="879.07" y="607.5" ></text>
+</g>
+<g >
+<title>FILL-SQUARE! (57 samples, 0.04%)</title><rect x="900.5" y="661" width="0.5" height="15.0" fill="rgb(232,65,47)" rx="2" ry="2" />
+<text  x="903.50" y="671.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (155 samples, 0.11%)</title><rect x="1157.5" y="613" width="1.4" height="15.0" fill="rgb(222,115,40)" rx="2" ry="2" />
+<text  x="1160.51" y="623.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (25 samples, 0.02%)</title><rect x="1189.7" y="597" width="0.2" height="15.0" fill="rgb(239,21,33)" rx="2" ry="2" />
+<text  x="1192.72" y="607.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (27 samples, 0.02%)</title><rect x="528.7" y="645" width="0.2" height="15.0" fill="rgb(243,165,38)" rx="2" ry="2" />
+<text  x="531.69" y="655.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (27 samples, 0.02%)</title><rect x="899.0" y="629" width="0.3" height="15.0" fill="rgb(226,206,25)" rx="2" ry="2" />
+<text  x="902.05" y="639.5" ></text>
+</g>
+<g >
+<title>GET-WORST-PIECE (53,663 samples, 39.78%)</title><rect x="713.3" y="709" width="469.4" height="15.0" fill="rgb(215,38,28)" rx="2" ry="2" />
+<text  x="716.29" y="719.5" >GET-WORST-PIECE</text>
+</g>
+<g >
+<title>ASH (15 samples, 0.01%)</title><rect x="894.8" y="629" width="0.2" height="15.0" fill="rgb(252,128,23)" rx="2" ry="2" />
+<text  x="897.82" y="639.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (24 samples, 0.02%)</title><rect x="1188.2" y="325" width="0.3" height="15.0" fill="rgb(246,222,17)" rx="2" ry="2" />
+<text  x="1191.24" y="335.5" ></text>
+</g>
+<g >
+<title>COLUMN-HEIGHT (772 samples, 0.57%)</title><rect x="622.3" y="693" width="6.8" height="15.0" fill="rgb(216,150,30)" rx="2" ry="2" />
+<text  x="625.35" y="703.5" ></text>
+</g>
+<g >
+<title>TWO-ARG-AND (18 samples, 0.01%)</title><rect x="539.1" y="661" width="0.2" height="15.0" fill="rgb(210,166,46)" rx="2" ry="2" />
+<text  x="542.13" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (78 samples, 0.06%)</title><rect x="1187.8" y="549" width="0.7" height="15.0" fill="rgb(247,192,2)" rx="2" ry="2" />
+<text  x="1190.84" y="559.5" ></text>
+</g>
+<g >
+<title>TWO-ARG-AND (19 samples, 0.01%)</title><rect x="653.4" y="661" width="0.2" height="15.0" fill="rgb(220,79,46)" rx="2" ry="2" />
+<text  x="656.42" y="671.5" ></text>
+</g>
+<g >
+<title>PCL (20 samples, 0.01%)</title><rect x="655.0" y="661" width="0.1" height="15.0" fill="rgb(247,213,31)" rx="2" ry="2" />
+<text  x="657.97" y="671.5" ></text>
+</g>
+<g >
+<title>EXPAND-NODES (98,626 samples, 73.11%)</title><rect x="326.5" y="773" width="862.7" height="15.0" fill="rgb(216,131,47)" rx="2" ry="2" />
+<text  x="329.53" y="783.5" >EXPAND-NODES</text>
+</g>
+<g >
+<title>PCL (32 samples, 0.02%)</title><rect x="627.9" y="629" width="0.2" height="15.0" fill="rgb(241,109,20)" rx="2" ry="2" />
+<text  x="630.87" y="639.5" ></text>
+</g>
+<g >
+<title>BUMPINESS (22 samples, 0.02%)</title><rect x="1183.9" y="725" width="0.2" height="15.0" fill="rgb(252,3,44)" rx="2" ry="2" />
+<text  x="1186.88" y="735.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (27 samples, 0.02%)</title><rect x="1110.6" y="101" width="0.2" height="15.0" fill="rgb(254,145,28)" rx="2" ry="2" />
+<text  x="1113.55" y="111.5" ></text>
+</g>
+<g >
+<title>EMPTY-SQUARE-P (516 samples, 0.38%)</title><rect x="624.5" y="677" width="4.5" height="15.0" fill="rgb(209,160,2)" rx="2" ry="2" />
+<text  x="627.52" y="687.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (64 samples, 0.05%)</title><rect x="1187.9" y="517" width="0.6" height="15.0" fill="rgb(227,168,41)" rx="2" ry="2" />
+<text  x="1190.93" y="527.5" ></text>
+</g>
+<g >
+<title>DLISP3.LISP&quot;) (31 samples, 0.02%)</title><rect x="909.2" y="629" width="0.3" height="15.0" fill="rgb(206,55,42)" rx="2" ry="2" />
+<text  x="912.20" y="639.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (27 samples, 0.02%)</title><rect x="1189.7" y="613" width="0.2" height="15.0" fill="rgb(237,144,6)" rx="2" ry="2" />
+<text  x="1192.70" y="623.5" ></text>
+</g>
+<g >
+<title>GET-PLACEMENTS (46,384 samples, 34.38%)</title><rect x="776.9" y="693" width="405.7" height="15.0" fill="rgb(252,227,17)" rx="2" ry="2" />
+<text  x="779.88" y="703.5" >GET-PLACEMENTS</text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (143 samples, 0.11%)</title><rect x="1138.9" y="533" width="1.3" height="15.0" fill="rgb(205,74,23)" rx="2" ry="2" />
+<text  x="1141.90" y="543.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (51 samples, 0.04%)</title><rect x="1115.9" y="277" width="0.4" height="15.0" fill="rgb(217,139,19)" rx="2" ry="2" />
+<text  x="1118.87" y="287.5" ></text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (38 samples, 0.03%)</title><rect x="642.5" y="613" width="0.3" height="15.0" fill="rgb(236,225,2)" rx="2" ry="2" />
+<text  x="645.47" y="623.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (81 samples, 0.06%)</title><rect x="1127.7" y="437" width="0.7" height="15.0" fill="rgb(222,70,43)" rx="2" ry="2" />
+<text  x="1130.73" y="447.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (26 samples, 0.02%)</title><rect x="1128.4" y="453" width="0.3" height="15.0" fill="rgb(251,118,35)" rx="2" ry="2" />
+<text  x="1131.44" y="463.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (20 samples, 0.01%)</title><rect x="776.4" y="597" width="0.2" height="15.0" fill="rgb(253,30,24)" rx="2" ry="2" />
+<text  x="779.41" y="607.5" ></text>
+</g>
+<g >
+<title>EMPTY-SQUARE-P (561 samples, 0.42%)</title><rect x="534.4" y="693" width="4.9" height="15.0" fill="rgb(239,175,11)" rx="2" ry="2" />
+<text  x="537.42" y="703.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (14 samples, 0.01%)</title><rect x="1189.8" y="469" width="0.1" height="15.0" fill="rgb(212,143,13)" rx="2" ry="2" />
+<text  x="1192.80" y="479.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (17 samples, 0.01%)</title><rect x="776.3" y="597" width="0.1" height="15.0" fill="rgb(238,37,54)" rx="2" ry="2" />
+<text  x="779.26" y="607.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (5,889 samples, 4.37%)</title><rect x="1072.4" y="437" width="51.6" height="15.0" fill="rgb(225,42,44)" rx="2" ry="2" />
+<text  x="1075.44" y="447.5" >ADD-I..</text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (20 samples, 0.01%)</title><rect x="655.0" y="645" width="0.1" height="15.0" fill="rgb(211,152,12)" rx="2" ry="2" />
+<text  x="657.97" y="655.5" ></text>
+</g>
+<g >
+<title>CLEAR-FULL-ROWS! (321 samples, 0.24%)</title><rect x="892.3" y="661" width="2.8" height="15.0" fill="rgb(228,104,20)" rx="2" ry="2" />
+<text  x="895.30" y="671.5" ></text>
+</g>
+<g >
+<title>Some binary code (94 samples, 0.07%)</title><rect x="1181.3" y="661" width="0.8" height="15.0" fill="rgb(218,167,23)" rx="2" ry="2" />
+<text  x="1184.32" y="671.5" ></text>
+</g>
+<g >
+<title>FIND (60 samples, 0.04%)</title><rect x="1139.6" y="501" width="0.5" height="15.0" fill="rgb(205,125,23)" rx="2" ry="2" />
+<text  x="1142.62" y="511.5" ></text>
+</g>
+<g >
+<title>Some binary code (18 samples, 0.01%)</title><rect x="513.9" y="693" width="0.1" height="15.0" fill="rgb(246,136,20)" rx="2" ry="2" />
+<text  x="516.89" y="703.5" ></text>
+</g>
+<g >
+<title>TWO-ARG-AND (15 samples, 0.01%)</title><rect x="541.5" y="677" width="0.1" height="15.0" fill="rgb(208,110,5)" rx="2" ry="2" />
+<text  x="544.47" y="687.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (56 samples, 0.04%)</title><rect x="1114.4" y="245" width="0.5" height="15.0" fill="rgb(248,60,12)" rx="2" ry="2" />
+<text  x="1117.43" y="255.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (60 samples, 0.04%)</title><rect x="1188.0" y="501" width="0.5" height="15.0" fill="rgb(250,189,6)" rx="2" ry="2" />
+<text  x="1190.96" y="511.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (14 samples, 0.01%)</title><rect x="1117.5" y="309" width="0.1" height="15.0" fill="rgb(212,45,11)" rx="2" ry="2" />
+<text  x="1120.48" y="319.5" ></text>
+</g>
+<g >
+<title>SXHASH (12 samples, 0.01%)</title><rect x="879.0" y="565" width="0.1" height="15.0" fill="rgb(206,31,35)" rx="2" ry="2" />
+<text  x="882.04" y="575.5" ></text>
+</g>
+<g >
+<title>GET-WORST-PIECE (504 samples, 0.37%)</title><rect x="1184.8" y="725" width="4.4" height="15.0" fill="rgb(206,72,45)" rx="2" ry="2" />
+<text  x="1187.77" y="735.5" ></text>
+</g>
+<g >
+<title>FIND (23 samples, 0.02%)</title><rect x="1113.9" y="197" width="0.2" height="15.0" fill="rgb(233,3,42)" rx="2" ry="2" />
+<text  x="1116.91" y="207.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (146 samples, 0.11%)</title><rect x="1187.5" y="629" width="1.2" height="15.0" fill="rgb(212,58,35)" rx="2" ry="2" />
+<text  x="1190.45" y="639.5" ></text>
+</g>
+<g >
+<title>Some binary code (29 samples, 0.02%)</title><rect x="541.7" y="709" width="0.2" height="15.0" fill="rgb(207,207,20)" rx="2" ry="2" />
+<text  x="544.67" y="719.5" ></text>
+</g>
+<g >
+<title>FIND (78 samples, 0.06%)</title><rect x="1148.4" y="549" width="0.6" height="15.0" fill="rgb(227,108,32)" rx="2" ry="2" />
+<text  x="1151.36" y="559.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (44 samples, 0.03%)</title><rect x="1119.0" y="325" width="0.4" height="15.0" fill="rgb(205,210,35)" rx="2" ry="2" />
+<text  x="1122.02" y="335.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (STATE) :IN GET-HEURISTIC-EVAL) (59 samples, 0.04%)</title><rect x="1183.6" y="741" width="0.6" height="15.0" fill="rgb(243,227,22)" rx="2" ry="2" />
+<text  x="1186.64" y="751.5" ></text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-REF/CHECK-BOUNDS (26 samples, 0.02%)</title><rect x="538.9" y="661" width="0.2" height="15.0" fill="rgb(230,206,10)" rx="2" ry="2" />
+<text  x="541.90" y="671.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (51 samples, 0.04%)</title><rect x="1155.2" y="613" width="0.5" height="15.0" fill="rgb(224,171,25)" rx="2" ry="2" />
+<text  x="1158.25" y="623.5" ></text>
+</g>
+<g >
+<title>EXPAND-NODES (6,639 samples, 4.92%)</title><rect x="483.9" y="741" width="58.0" height="15.0" fill="rgb(242,50,13)" rx="2" ry="2" />
+<text  x="486.87" y="751.5" >EXPAND..</text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (76 samples, 0.06%)</title><rect x="1120.6" y="373" width="0.7" height="15.0" fill="rgb(209,10,47)" rx="2" ry="2" />
+<text  x="1123.60" y="383.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (37 samples, 0.03%)</title><rect x="1179.1" y="629" width="0.3" height="15.0" fill="rgb(251,195,46)" rx="2" ry="2" />
+<text  x="1182.12" y="639.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (69 samples, 0.05%)</title><rect x="1115.0" y="277" width="0.6" height="15.0" fill="rgb(252,41,50)" rx="2" ry="2" />
+<text  x="1118.02" y="287.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (22 samples, 0.02%)</title><rect x="885.8" y="645" width="0.2" height="15.0" fill="rgb(217,1,54)" rx="2" ry="2" />
+<text  x="888.79" y="655.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (139 samples, 0.10%)</title><rect x="1151.0" y="581" width="1.2" height="15.0" fill="rgb(217,29,8)" rx="2" ry="2" />
+<text  x="1153.95" y="591.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (41 samples, 0.03%)</title><rect x="1188.1" y="421" width="0.4" height="15.0" fill="rgb(227,124,16)" rx="2" ry="2" />
+<text  x="1191.11" y="431.5" ></text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-SET (18 samples, 0.01%)</title><rect x="900.0" y="629" width="0.1" height="15.0" fill="rgb(214,23,46)" rx="2" ry="2" />
+<text  x="902.96" y="639.5" ></text>
+</g>
+<g >
+<title>(SB-PCL::FAST-METHOD ADVANCE (BEAM-SEARCHER)) (125,860 samples, 93.29%)</title><rect x="89.1" y="821" width="1100.9" height="15.0" fill="rgb(215,158,38)" rx="2" ry="2" />
+<text  x="92.12" y="831.5" >(SB-PCL::FAST-METHOD ADVANCE (BEAM-SEARCHER))</text>
+</g>
+<g >
+<title>FULL-SQUARE-P (251 samples, 0.19%)</title><rect x="653.6" y="693" width="2.2" height="15.0" fill="rgb(221,176,12)" rx="2" ry="2" />
+<text  x="656.64" y="703.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (164 samples, 0.12%)</title><rect x="1124.0" y="437" width="1.4" height="15.0" fill="rgb(220,206,13)" rx="2" ry="2" />
+<text  x="1126.95" y="447.5" ></text>
+</g>
+<g >
+<title>COLUMN-HEIGHT (16 samples, 0.01%)</title><rect x="1183.9" y="709" width="0.2" height="15.0" fill="rgb(210,91,17)" rx="2" ry="2" />
+<text  x="1186.93" y="719.5" ></text>
+</g>
+<g >
+<title>CALL-WITH-RECURSIVE-SYSTEM-LOCK (173 samples, 0.13%)</title><rect x="837.4" y="645" width="1.5" height="15.0" fill="rgb(252,119,30)" rx="2" ry="2" />
+<text  x="840.39" y="655.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (22 samples, 0.02%)</title><rect x="901.1" y="661" width="0.1" height="15.0" fill="rgb(253,81,50)" rx="2" ry="2" />
+<text  x="904.06" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (434 samples, 0.32%)</title><rect x="1108.1" y="197" width="3.8" height="15.0" fill="rgb(233,70,28)" rx="2" ry="2" />
+<text  x="1111.13" y="207.5" ></text>
+</g>
+<g >
+<title>WELL-HEIGHT (53 samples, 0.04%)</title><rect x="887.7" y="661" width="0.4" height="15.0" fill="rgb(217,148,49)" rx="2" ry="2" />
+<text  x="890.66" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (38 samples, 0.03%)</title><rect x="1188.1" y="405" width="0.4" height="15.0" fill="rgb(210,132,29)" rx="2" ry="2" />
+<text  x="1191.14" y="415.5" ></text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-REF/CHECK-BOUNDS (20 samples, 0.01%)</title><rect x="653.2" y="661" width="0.2" height="15.0" fill="rgb(235,133,52)" rx="2" ry="2" />
+<text  x="656.24" y="671.5" ></text>
+</g>
+<g >
+<title>EXTREMUM (729 samples, 0.54%)</title><rect x="770.5" y="693" width="6.4" height="15.0" fill="rgb(244,193,11)" rx="2" ry="2" />
+<text  x="773.48" y="703.5" ></text>
+</g>
+<g >
+<title>FIND (26 samples, 0.02%)</title><rect x="1114.7" y="213" width="0.2" height="15.0" fill="rgb(232,5,20)" rx="2" ry="2" />
+<text  x="1117.69" y="223.5" ></text>
+</g>
+<g >
+<title>PCL (40 samples, 0.03%)</title><rect x="528.3" y="629" width="0.4" height="15.0" fill="rgb(233,149,34)" rx="2" ry="2" />
+<text  x="531.34" y="639.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-SET (UNSIGNED-BYTE 15)) (17 samples, 0.01%)</title><rect x="899.3" y="629" width="0.1" height="15.0" fill="rgb(242,88,4)" rx="2" ry="2" />
+<text  x="902.28" y="639.5" ></text>
+</g>
+<g >
+<title>SXHASH (242 samples, 0.18%)</title><rect x="839.7" y="629" width="2.1" height="15.0" fill="rgb(253,178,4)" rx="2" ry="2" />
+<text  x="842.70" y="639.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (24 samples, 0.02%)</title><rect x="512.9" y="645" width="0.2" height="15.0" fill="rgb(211,112,10)" rx="2" ry="2" />
+<text  x="515.90" y="655.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (221 samples, 0.16%)</title><rect x="1187.0" y="677" width="1.9" height="15.0" fill="rgb(247,122,33)" rx="2" ry="2" />
+<text  x="1189.97" y="687.5" ></text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-REF/CHECK-BOUNDS (23 samples, 0.02%)</title><rect x="513.5" y="645" width="0.2" height="15.0" fill="rgb(220,10,25)" rx="2" ry="2" />
+<text  x="516.47" y="655.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (18 samples, 0.01%)</title><rect x="888.0" y="645" width="0.1" height="15.0" fill="rgb(233,65,48)" rx="2" ry="2" />
+<text  x="890.96" y="655.5" ></text>
+</g>
+<g >
+<title>PCL (15 samples, 0.01%)</title><rect x="909.1" y="645" width="0.1" height="15.0" fill="rgb(226,22,24)" rx="2" ry="2" />
+<text  x="912.07" y="655.5" ></text>
+</g>
+<g >
+<title>EQUALP (16 samples, 0.01%)</title><rect x="1121.1" y="325" width="0.2" height="15.0" fill="rgb(222,219,19)" rx="2" ry="2" />
+<text  x="1124.12" y="335.5" ></text>
+</g>
+<g >
+<title>EMPTY-SQUARE-P (856 samples, 0.63%)</title><rect x="636.9" y="677" width="7.5" height="15.0" fill="rgb(250,208,47)" rx="2" ry="2" />
+<text  x="639.92" y="687.5" ></text>
+</g>
+<g >
+<title>PCL (38 samples, 0.03%)</title><rect x="642.5" y="629" width="0.3" height="15.0" fill="rgb(252,187,4)" rx="2" ry="2" />
+<text  x="645.47" y="639.5" ></text>
+</g>
+<g >
+<title>QUEUE-EMPTY-P (24 samples, 0.02%)</title><rect x="906.2" y="677" width="0.2" height="15.0" fill="rgb(218,152,51)" rx="2" ry="2" />
+<text  x="909.17" y="687.5" ></text>
+</g>
+<g >
+<title>GET-PLACEMENTS (422 samples, 0.31%)</title><rect x="1185.5" y="709" width="3.7" height="15.0" fill="rgb(252,163,5)" rx="2" ry="2" />
+<text  x="1188.49" y="719.5" ></text>
+</g>
+<g >
+<title>PCL (37 samples, 0.03%)</title><rect x="1173.3" y="629" width="0.3" height="15.0" fill="rgb(254,22,14)" rx="2" ry="2" />
+<text  x="1176.30" y="639.5" ></text>
+</g>
+<g >
+<title>PCL (12 samples, 0.01%)</title><rect x="907.4" y="645" width="0.1" height="15.0" fill="rgb(232,68,7)" rx="2" ry="2" />
+<text  x="910.40" y="655.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (28 samples, 0.02%)</title><rect x="1188.2" y="357" width="0.3" height="15.0" fill="rgb(227,164,50)" rx="2" ry="2" />
+<text  x="1191.21" y="367.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (35 samples, 0.03%)</title><rect x="1116.6" y="293" width="0.3" height="15.0" fill="rgb(223,164,22)" rx="2" ry="2" />
+<text  x="1119.56" y="303.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (20 samples, 0.01%)</title><rect x="655.0" y="677" width="0.1" height="15.0" fill="rgb(231,226,52)" rx="2" ry="2" />
+<text  x="657.97" y="687.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (30 samples, 0.02%)</title><rect x="1112.2" y="165" width="0.2" height="15.0" fill="rgb(240,121,46)" rx="2" ry="2" />
+<text  x="1115.17" y="175.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (56 samples, 0.04%)</title><rect x="1188.0" y="485" width="0.5" height="15.0" fill="rgb(243,46,8)" rx="2" ry="2" />
+<text  x="1191.00" y="495.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;BODY-FUN-8&quot; :IN SB-KERNEL:%PUTHASH) (753 samples, 0.56%)</title><rect x="835.3" y="661" width="6.5" height="15.0" fill="rgb(254,140,7)" rx="2" ry="2" />
+<text  x="838.25" y="671.5" ></text>
+</g>
+<g >
+<title>DLISP3.LISP&quot;) (12 samples, 0.01%)</title><rect x="907.4" y="629" width="0.1" height="15.0" fill="rgb(249,195,35)" rx="2" ry="2" />
+<text  x="910.40" y="639.5" ></text>
+</g>
+<g >
+<title>LOCKABLE-P (17 samples, 0.01%)</title><rect x="1186.5" y="693" width="0.1" height="15.0" fill="rgb(246,83,9)" rx="2" ry="2" />
+<text  x="1189.48" y="703.5" ></text>
+</g>
+<g >
+<title>GET-PLACEMENTS (59 samples, 0.04%)</title><rect x="1189.5" y="725" width="0.5" height="15.0" fill="rgb(218,105,43)" rx="2" ry="2" />
+<text  x="1192.48" y="735.5" ></text>
+</g>
+<g >
+<title>EMPTY-SQUARE-P (494 samples, 0.37%)</title><rect x="509.5" y="677" width="4.3" height="15.0" fill="rgb(222,177,47)" rx="2" ry="2" />
+<text  x="512.51" y="687.5" ></text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (37 samples, 0.03%)</title><rect x="1173.3" y="613" width="0.3" height="15.0" fill="rgb(217,161,10)" rx="2" ry="2" />
+<text  x="1176.30" y="623.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (39 samples, 0.03%)</title><rect x="1173.6" y="645" width="0.4" height="15.0" fill="rgb(223,226,52)" rx="2" ry="2" />
+<text  x="1176.63" y="655.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (63 samples, 0.05%)</title><rect x="1116.4" y="309" width="0.5" height="15.0" fill="rgb(236,25,5)" rx="2" ry="2" />
+<text  x="1119.40" y="319.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (30 samples, 0.02%)</title><rect x="1188.2" y="373" width="0.3" height="15.0" fill="rgb(246,196,14)" rx="2" ry="2" />
+<text  x="1191.19" y="383.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (75 samples, 0.06%)</title><rect x="886.8" y="661" width="0.7" height="15.0" fill="rgb(215,64,31)" rx="2" ry="2" />
+<text  x="889.81" y="671.5" ></text>
+</g>
+<g >
+<title>FIND-SLOT-CELL (280 samples, 0.21%)</title><rect x="853.7" y="645" width="2.5" height="15.0" fill="rgb(234,63,18)" rx="2" ry="2" />
+<text  x="856.70" y="655.5" ></text>
+</g>
+<g >
+<title>MAKE-ARRAY (42 samples, 0.03%)</title><rect x="900.1" y="629" width="0.4" height="15.0" fill="rgb(232,128,24)" rx="2" ry="2" />
+<text  x="903.11" y="639.5" ></text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (33 samples, 0.02%)</title><rect x="538.2" y="629" width="0.2" height="15.0" fill="rgb(225,28,38)" rx="2" ry="2" />
+<text  x="541.15" y="639.5" ></text>
+</g>
+<g >
+<title>EXTREMUM (12 samples, 0.01%)</title><rect x="1185.4" y="709" width="0.1" height="15.0" fill="rgb(220,44,18)" rx="2" ry="2" />
+<text  x="1188.38" y="719.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (22 samples, 0.02%)</title><rect x="1188.3" y="309" width="0.2" height="15.0" fill="rgb(209,191,19)" rx="2" ry="2" />
+<text  x="1191.26" y="319.5" ></text>
+</g>
+<g >
+<title>ARRAY-TOTAL-SIZE (50 samples, 0.04%)</title><rect x="1177.8" y="645" width="0.4" height="15.0" fill="rgb(205,201,0)" rx="2" ry="2" />
+<text  x="1180.80" y="655.5" ></text>
+</g>
+<g >
+<title>PCL (33 samples, 0.02%)</title><rect x="538.2" y="645" width="0.2" height="15.0" fill="rgb(252,135,47)" rx="2" ry="2" />
+<text  x="541.15" y="655.5" ></text>
+</g>
+<g >
+<title>GET-WORST-PIECE (63 samples, 0.05%)</title><rect x="1189.4" y="741" width="0.6" height="15.0" fill="rgb(222,182,18)" rx="2" ry="2" />
+<text  x="1192.45" y="751.5" ></text>
+</g>
+<g >
+<title>Some binary code (22 samples, 0.02%)</title><rect x="887.5" y="661" width="0.2" height="15.0" fill="rgb(246,77,9)" rx="2" ry="2" />
+<text  x="890.46" y="671.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (174 samples, 0.13%)</title><rect x="1125.4" y="453" width="1.5" height="15.0" fill="rgb(213,127,36)" rx="2" ry="2" />
+<text  x="1128.40" y="463.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (32 samples, 0.02%)</title><rect x="1119.9" y="341" width="0.3" height="15.0" fill="rgb(232,100,20)" rx="2" ry="2" />
+<text  x="1122.88" y="351.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (32 samples, 0.02%)</title><rect x="1115.2" y="261" width="0.3" height="15.0" fill="rgb(209,63,4)" rx="2" ry="2" />
+<text  x="1118.22" y="271.5" ></text>
+</g>
+<g >
+<title>FIND (19 samples, 0.01%)</title><rect x="1120.0" y="325" width="0.2" height="15.0" fill="rgb(252,76,1)" rx="2" ry="2" />
+<text  x="1122.99" y="335.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (41 samples, 0.03%)</title><rect x="1110.1" y="85" width="0.4" height="15.0" fill="rgb(224,159,29)" rx="2" ry="2" />
+<text  x="1113.14" y="95.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (29 samples, 0.02%)</title><rect x="1111.3" y="165" width="0.3" height="15.0" fill="rgb(225,215,52)" rx="2" ry="2" />
+<text  x="1114.34" y="175.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (254 samples, 0.19%)</title><rect x="1109.1" y="165" width="2.2" height="15.0" fill="rgb(233,176,54)" rx="2" ry="2" />
+<text  x="1112.12" y="175.5" ></text>
+</g>
+<g >
+<title>%VECTOR-WIDETAG-AND-N-BITS-SHIFT (19 samples, 0.01%)</title><rect x="900.3" y="613" width="0.2" height="15.0" fill="rgb(205,106,33)" rx="2" ry="2" />
+<text  x="903.31" y="623.5" ></text>
+</g>
+<g >
+<title>PCL (23 samples, 0.02%)</title><rect x="540.7" y="661" width="0.2" height="15.0" fill="rgb(253,24,9)" rx="2" ry="2" />
+<text  x="543.70" y="671.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (41 samples, 0.03%)</title><rect x="1112.1" y="181" width="0.3" height="15.0" fill="rgb(241,103,2)" rx="2" ry="2" />
+<text  x="1115.07" y="191.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (178 samples, 0.13%)</title><rect x="1129.4" y="469" width="1.5" height="15.0" fill="rgb(248,26,45)" rx="2" ry="2" />
+<text  x="1132.38" y="479.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (3,558 samples, 2.64%)</title><rect x="1088.4" y="373" width="31.1" height="15.0" fill="rgb(232,113,44)" rx="2" ry="2" />
+<text  x="1091.40" y="383.5" >AD..</text>
+</g>
+<g >
+<title>foreign function handle_trap (12 samples, 0.01%)</title><rect x="1182.5" y="677" width="0.1" height="15.0" fill="rgb(253,3,5)" rx="2" ry="2" />
+<text  x="1185.49" y="687.5" ></text>
+</g>
+<g >
+<title>FIND (79 samples, 0.06%)</title><rect x="1145.4" y="533" width="0.7" height="15.0" fill="rgb(218,165,35)" rx="2" ry="2" />
+<text  x="1148.44" y="543.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (26 samples, 0.02%)</title><rect x="1188.2" y="341" width="0.3" height="15.0" fill="rgb(220,40,49)" rx="2" ry="2" />
+<text  x="1191.22" y="351.5" ></text>
+</g>
+<g >
+<title>SXHASH (901 samples, 0.67%)</title><rect x="871.6" y="629" width="7.8" height="15.0" fill="rgb(237,49,51)" rx="2" ry="2" />
+<text  x="874.56" y="639.5" ></text>
+</g>
+<g >
+<title>SET-SLOT-VALUE (13 samples, 0.01%)</title><rect x="1186.2" y="677" width="0.1" height="15.0" fill="rgb(208,112,11)" rx="2" ry="2" />
+<text  x="1189.20" y="687.5" ></text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (18 samples, 0.01%)</title><rect x="888.0" y="613" width="0.1" height="15.0" fill="rgb(237,39,3)" rx="2" ry="2" />
+<text  x="890.96" y="623.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (33 samples, 0.02%)</title><rect x="1113.2" y="197" width="0.3" height="15.0" fill="rgb(245,91,17)" rx="2" ry="2" />
+<text  x="1116.19" y="207.5" ></text>
+</g>
+<g >
+<title>(LABELS SB-IMPL::SXHASH-RECURSE :IN SXHASH) (155 samples, 0.11%)</title><rect x="877.8" y="581" width="1.3" height="15.0" fill="rgb(232,227,0)" rx="2" ry="2" />
+<text  x="880.79" y="591.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (STATE) :IN GET-HEURISTIC-EVAL) (5,426 samples, 4.02%)</title><rect x="494.5" y="725" width="47.4" height="15.0" fill="rgb(213,194,1)" rx="2" ry="2" />
+<text  x="497.48" y="735.5" >(LAM..</text>
+</g>
+<g >
+<title>TRUNCATE (32 samples, 0.02%)</title><rect x="905.8" y="645" width="0.3" height="15.0" fill="rgb(238,115,8)" rx="2" ry="2" />
+<text  x="908.82" y="655.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (51 samples, 0.04%)</title><rect x="1189.6" y="693" width="0.4" height="15.0" fill="rgb(231,77,7)" rx="2" ry="2" />
+<text  x="1192.55" y="703.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (93 samples, 0.07%)</title><rect x="1114.2" y="261" width="0.8" height="15.0" fill="rgb(246,123,29)" rx="2" ry="2" />
+<text  x="1117.21" y="271.5" ></text>
+</g>
+<g >
+<title>FIND (30 samples, 0.02%)</title><rect x="1118.2" y="293" width="0.3" height="15.0" fill="rgb(227,164,34)" rx="2" ry="2" />
+<text  x="1121.20" y="303.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (9,476 samples, 7.02%)</title><rect x="1048.3" y="501" width="82.9" height="15.0" fill="rgb(231,223,19)" rx="2" ry="2" />
+<text  x="1051.28" y="511.5" >ADD-IF-UN..</text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (168 samples, 0.12%)</title><rect x="1121.4" y="405" width="1.5" height="15.0" fill="rgb(206,152,0)" rx="2" ry="2" />
+<text  x="1124.40" y="415.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;BODY-FUN-0&quot; :IN SB-IMPL::GETHASH3) (12 samples, 0.01%)</title><rect x="905.6" y="629" width="0.1" height="15.0" fill="rgb(209,94,42)" rx="2" ry="2" />
+<text  x="908.59" y="639.5" ></text>
+</g>
+<g >
+<title>(LABELS SB-IMPL::SXHASH-RECURSE :IN SXHASH) (166 samples, 0.12%)</title><rect x="840.3" y="613" width="1.5" height="15.0" fill="rgb(233,25,20)" rx="2" ry="2" />
+<text  x="843.34" y="623.5" ></text>
+</g>
+<g >
+<title>FIND (15 samples, 0.01%)</title><rect x="1116.7" y="261" width="0.2" height="15.0" fill="rgb(212,15,21)" rx="2" ry="2" />
+<text  x="1119.74" y="271.5" ></text>
+</g>
+<g >
+<title>EMPTY-SQUARE-P (564 samples, 0.42%)</title><rect x="648.7" y="693" width="4.9" height="15.0" fill="rgb(249,168,31)" rx="2" ry="2" />
+<text  x="651.70" y="703.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (44 samples, 0.03%)</title><rect x="1113.1" y="213" width="0.4" height="15.0" fill="rgb(223,56,44)" rx="2" ry="2" />
+<text  x="1116.10" y="223.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (21 samples, 0.02%)</title><rect x="538.4" y="661" width="0.2" height="15.0" fill="rgb(249,117,15)" rx="2" ry="2" />
+<text  x="541.44" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (1,414 samples, 1.05%)</title><rect x="1102.7" y="277" width="12.3" height="15.0" fill="rgb(206,139,36)" rx="2" ry="2" />
+<text  x="1105.65" y="287.5" ></text>
+</g>
+<g >
+<title>EMPTY-SQUARE-P (919 samples, 0.68%)</title><rect x="522.2" y="677" width="8.1" height="15.0" fill="rgb(247,66,31)" rx="2" ry="2" />
+<text  x="525.24" y="687.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (202 samples, 0.15%)</title><rect x="1187.1" y="661" width="1.8" height="15.0" fill="rgb(252,26,21)" rx="2" ry="2" />
+<text  x="1190.14" y="671.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (31 samples, 0.02%)</title><rect x="909.2" y="661" width="0.3" height="15.0" fill="rgb(220,163,11)" rx="2" ry="2" />
+<text  x="912.20" y="671.5" ></text>
+</g>
+<g >
+<title>EQUALP (22 samples, 0.02%)</title><rect x="1135.4" y="453" width="0.2" height="15.0" fill="rgb(218,96,24)" rx="2" ry="2" />
+<text  x="1138.44" y="463.5" ></text>
+</g>
+<g >
+<title>PCL (36 samples, 0.03%)</title><rect x="907.5" y="645" width="0.3" height="15.0" fill="rgb(224,192,25)" rx="2" ry="2" />
+<text  x="910.50" y="655.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (112 samples, 0.08%)</title><rect x="1117.6" y="341" width="1.0" height="15.0" fill="rgb(252,162,2)" rx="2" ry="2" />
+<text  x="1120.62" y="351.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (110 samples, 0.08%)</title><rect x="1187.7" y="597" width="0.9" height="15.0" fill="rgb(217,46,28)" rx="2" ry="2" />
+<text  x="1190.66" y="607.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (18 samples, 0.01%)</title><rect x="1189.8" y="533" width="0.1" height="15.0" fill="rgb(226,144,16)" rx="2" ry="2" />
+<text  x="1192.76" y="543.5" ></text>
+</g>
+<g >
+<title>ROW-FULL-P (118 samples, 0.09%)</title><rect x="894.0" y="645" width="1.0" height="15.0" fill="rgb(243,217,19)" rx="2" ry="2" />
+<text  x="897.01" y="655.5" ></text>
+</g>
+<g >
+<title>DEEP-COPY-STATE (616 samples, 0.46%)</title><rect x="895.1" y="661" width="5.4" height="15.0" fill="rgb(230,106,49)" rx="2" ry="2" />
+<text  x="898.11" y="671.5" ></text>
+</g>
+<g >
+<title>REDUCE (609 samples, 0.45%)</title><rect x="771.5" y="677" width="5.4" height="15.0" fill="rgb(247,40,8)" rx="2" ry="2" />
+<text  x="774.53" y="687.5" ></text>
+</g>
+<g >
+<title>TOWER-ABOVE-BAR (16 samples, 0.01%)</title><rect x="901.3" y="661" width="0.2" height="15.0" fill="rgb(247,143,41)" rx="2" ry="2" />
+<text  x="904.31" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (86 samples, 0.06%)</title><rect x="1187.8" y="565" width="0.7" height="15.0" fill="rgb(209,157,52)" rx="2" ry="2" />
+<text  x="1190.79" y="575.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (47 samples, 0.03%)</title><rect x="1189.6" y="677" width="0.4" height="15.0" fill="rgb(249,20,15)" rx="2" ry="2" />
+<text  x="1192.59" y="687.5" ></text>
+</g>
+<g >
+<title>PCL (23 samples, 0.02%)</title><rect x="652.5" y="645" width="0.2" height="15.0" fill="rgb(214,87,16)" rx="2" ry="2" />
+<text  x="655.50" y="655.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (13 samples, 0.01%)</title><rect x="1118.5" y="325" width="0.1" height="15.0" fill="rgb(216,213,0)" rx="2" ry="2" />
+<text  x="1121.46" y="335.5" ></text>
+</g>
+<g >
+<title>POSSIBLE-NEXT-STATES (574 samples, 0.43%)</title><rect x="1184.2" y="741" width="5.0" height="15.0" fill="rgb(251,217,43)" rx="2" ry="2" />
+<text  x="1187.16" y="751.5" ></text>
+</g>
+<g >
+<title>FIND (46 samples, 0.03%)</title><rect x="1124.8" y="389" width="0.4" height="15.0" fill="rgb(216,159,41)" rx="2" ry="2" />
+<text  x="1127.82" y="399.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (127 samples, 0.09%)</title><rect x="1147.9" y="565" width="1.1" height="15.0" fill="rgb(221,135,15)" rx="2" ry="2" />
+<text  x="1150.93" y="575.5" ></text>
+</g>
+<g >
+<title>SET-SLOT-VALUE (816 samples, 0.60%)</title><rect x="849.2" y="661" width="7.2" height="15.0" fill="rgb(238,14,21)" rx="2" ry="2" />
+<text  x="852.21" y="671.5" ></text>
+</g>
+<g >
+<title>ARRAY-TOTAL-SIZE (25 samples, 0.02%)</title><rect x="899.5" y="629" width="0.2" height="15.0" fill="rgb(254,171,2)" rx="2" ry="2" />
+<text  x="902.48" y="639.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (331 samples, 0.25%)</title><rect x="1108.7" y="181" width="2.9" height="15.0" fill="rgb(248,148,29)" rx="2" ry="2" />
+<text  x="1111.70" y="191.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (23 samples, 0.02%)</title><rect x="652.5" y="661" width="0.2" height="15.0" fill="rgb(223,67,34)" rx="2" ry="2" />
+<text  x="655.50" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (99 samples, 0.07%)</title><rect x="1109.9" y="117" width="0.9" height="15.0" fill="rgb(254,120,48)" rx="2" ry="2" />
+<text  x="1112.92" y="127.5" ></text>
+</g>
+<g >
+<title>PIECE-RIGHT (34 samples, 0.03%)</title><rect x="902.1" y="677" width="0.3" height="15.0" fill="rgb(244,57,3)" rx="2" ry="2" />
+<text  x="905.08" y="687.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (127 samples, 0.09%)</title><rect x="1145.0" y="549" width="1.1" height="15.0" fill="rgb(223,178,2)" rx="2" ry="2" />
+<text  x="1148.02" y="559.5" ></text>
+</g>
+<g >
+<title>(LABELS SB-IMPL::RECUR :IN SB-IMPL::STABLE-SORT-LIST) (18 samples, 0.01%)</title><rect x="1182.7" y="709" width="0.2" height="15.0" fill="rgb(230,38,26)" rx="2" ry="2" />
+<text  x="1185.71" y="719.5" ></text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-REF/CHECK-BOUNDS (22 samples, 0.02%)</title><rect x="655.5" y="677" width="0.2" height="15.0" fill="rgb(210,0,52)" rx="2" ry="2" />
+<text  x="658.48" y="687.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (100 samples, 0.07%)</title><rect x="1139.3" y="517" width="0.8" height="15.0" fill="rgb(244,136,22)" rx="2" ry="2" />
+<text  x="1142.27" y="527.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (91 samples, 0.07%)</title><rect x="1119.5" y="373" width="0.8" height="15.0" fill="rgb(234,39,52)" rx="2" ry="2" />
+<text  x="1122.52" y="383.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (50 samples, 0.04%)</title><rect x="1188.0" y="469" width="0.5" height="15.0" fill="rgb(216,88,28)" rx="2" ry="2" />
+<text  x="1191.03" y="479.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.PV. SB-PCL::.NEXT-METHOD-CALL. SB-KERNEL:INSTANCE) :IN SB-PCL::MAKE-STD-READER-METHOD-FUNCTION) (12 samples, 0.01%)</title><rect x="909.5" y="661" width="0.1" height="15.0" fill="rgb(245,69,42)" rx="2" ry="2" />
+<text  x="912.47" y="671.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (88 samples, 0.07%)</title><rect x="1115.6" y="293" width="0.8" height="15.0" fill="rgb(212,96,23)" rx="2" ry="2" />
+<text  x="1118.63" y="303.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (73 samples, 0.05%)</title><rect x="1187.9" y="533" width="0.6" height="15.0" fill="rgb(248,195,25)" rx="2" ry="2" />
+<text  x="1190.88" y="543.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (13 samples, 0.01%)</title><rect x="1111.2" y="117" width="0.1" height="15.0" fill="rgb(254,10,9)" rx="2" ry="2" />
+<text  x="1114.20" y="127.5" ></text>
+</g>
+<g >
+<title>WELL-WIDTH (13 samples, 0.01%)</title><rect x="1179.4" y="645" width="0.2" height="15.0" fill="rgb(207,192,35)" rx="2" ry="2" />
+<text  x="1182.44" y="655.5" ></text>
+</g>
+<g >
+<title>FIND (87 samples, 0.06%)</title><rect x="1142.4" y="517" width="0.7" height="15.0" fill="rgb(208,108,25)" rx="2" ry="2" />
+<text  x="1145.38" y="527.5" ></text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (28 samples, 0.02%)</title><rect x="885.5" y="613" width="0.3" height="15.0" fill="rgb(230,102,53)" rx="2" ry="2" />
+<text  x="888.55" y="623.5" ></text>
+</g>
+<g >
+<title>ASH (22 samples, 0.02%)</title><rect x="655.3" y="677" width="0.2" height="15.0" fill="rgb(216,179,44)" rx="2" ry="2" />
+<text  x="658.29" y="687.5" ></text>
+</g>
+<g >
+<title>PIECE-KEY (18 samples, 0.01%)</title><rect x="842.1" y="661" width="0.2" height="15.0" fill="rgb(212,12,30)" rx="2" ry="2" />
+<text  x="845.14" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (2,314 samples, 1.72%)</title><rect x="1096.7" y="325" width="20.2" height="15.0" fill="rgb(230,21,0)" rx="2" ry="2" />
+<text  x="1099.71" y="335.5" ></text>
+</g>
+<g >
+<title>%PUTHASH (1,025 samples, 0.76%)</title><rect x="832.9" y="677" width="8.9" height="15.0" fill="rgb(210,139,39)" rx="2" ry="2" />
+<text  x="835.88" y="687.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (13 samples, 0.01%)</title><rect x="1189.8" y="453" width="0.1" height="15.0" fill="rgb(242,19,51)" rx="2" ry="2" />
+<text  x="1192.81" y="463.5" ></text>
+</g>
+<g >
+<title>(SB-VM::OPTIMIZED-DATA-VECTOR-REF (UNSIGNED-BYTE 15)) (17 samples, 0.01%)</title><rect x="655.1" y="677" width="0.2" height="15.0" fill="rgb(232,201,21)" rx="2" ry="2" />
+<text  x="658.14" y="687.5" ></text>
+</g>
+<g >
+<title>DLISP3.LISP&quot;) (15 samples, 0.01%)</title><rect x="909.1" y="629" width="0.1" height="15.0" fill="rgb(214,172,26)" rx="2" ry="2" />
+<text  x="912.07" y="639.5" ></text>
+</g>
+<g >
+<title>FIND (100 samples, 0.07%)</title><rect x="1158.0" y="597" width="0.9" height="15.0" fill="rgb(252,214,16)" rx="2" ry="2" />
+<text  x="1161.00" y="607.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (113 samples, 0.08%)</title><rect x="1127.5" y="453" width="0.9" height="15.0" fill="rgb(223,103,51)" rx="2" ry="2" />
+<text  x="1130.45" y="463.5" ></text>
+</g>
+<g >
+<title>EQUALP (28 samples, 0.02%)</title><rect x="1155.0" y="565" width="0.2" height="15.0" fill="rgb(208,167,0)" rx="2" ry="2" />
+<text  x="1157.95" y="575.5" ></text>
+</g>
+<g >
+<title>GETHASH3 (2,625 samples, 1.95%)</title><rect x="856.5" y="677" width="23.0" height="15.0" fill="rgb(229,12,5)" rx="2" ry="2" />
+<text  x="859.54" y="687.5" >G..</text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (14 samples, 0.01%)</title><rect x="1125.2" y="421" width="0.1" height="15.0" fill="rgb(207,199,22)" rx="2" ry="2" />
+<text  x="1128.22" y="431.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;BODY-FUN-0&quot; :IN SB-IMPL::GETHASH3) (1,929 samples, 1.43%)</title><rect x="862.6" y="661" width="16.8" height="15.0" fill="rgb(230,225,26)" rx="2" ry="2" />
+<text  x="865.57" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (20 samples, 0.01%)</title><rect x="1189.7" y="565" width="0.2" height="15.0" fill="rgb(244,63,24)" rx="2" ry="2" />
+<text  x="1192.75" y="575.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (104 samples, 0.08%)</title><rect x="1118.6" y="357" width="0.9" height="15.0" fill="rgb(245,200,37)" rx="2" ry="2" />
+<text  x="1121.60" y="367.5" ></text>
+</g>
+<g >
+<title>TWO-ARG-AND (20 samples, 0.01%)</title><rect x="886.6" y="645" width="0.2" height="15.0" fill="rgb(238,87,54)" rx="2" ry="2" />
+<text  x="889.61" y="655.5" ></text>
+</g>
+<g >
+<title>ROW-EMPTY-P (122 samples, 0.09%)</title><rect x="775.6" y="613" width="1.1" height="15.0" fill="rgb(205,140,53)" rx="2" ry="2" />
+<text  x="778.65" y="623.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (336 samples, 0.25%)</title><rect x="1146.6" y="597" width="2.9" height="15.0" fill="rgb(209,193,31)" rx="2" ry="2" />
+<text  x="1149.57" y="607.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (134 samples, 0.10%)</title><rect x="1154.1" y="597" width="1.1" height="15.0" fill="rgb(234,10,13)" rx="2" ry="2" />
+<text  x="1157.08" y="607.5" ></text>
+</g>
+<g >
+<title>PIECE-ROTATE (434 samples, 0.32%)</title><rect x="902.4" y="677" width="3.8" height="15.0" fill="rgb(250,32,51)" rx="2" ry="2" />
+<text  x="905.38" y="687.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (93 samples, 0.07%)</title><rect x="1121.8" y="389" width="0.9" height="15.0" fill="rgb(217,163,47)" rx="2" ry="2" />
+<text  x="1124.84" y="399.5" ></text>
+</g>
+<g >
+<title>AGGREGATE-HEIGHT (1,046 samples, 0.78%)</title><rect x="620.1" y="709" width="9.1" height="15.0" fill="rgb(224,72,7)" rx="2" ry="2" />
+<text  x="623.07" y="719.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (15 samples, 0.01%)</title><rect x="1110.7" y="69" width="0.1" height="15.0" fill="rgb(220,39,37)" rx="2" ry="2" />
+<text  x="1113.66" y="79.5" ></text>
+</g>
+<g >
+<title>ASH (31 samples, 0.02%)</title><rect x="538.6" y="661" width="0.3" height="15.0" fill="rgb(254,212,11)" rx="2" ry="2" />
+<text  x="541.62" y="671.5" ></text>
+</g>
+<g >
+<title>Some binary code (26 samples, 0.02%)</title><rect x="655.9" y="709" width="0.2" height="15.0" fill="rgb(214,66,31)" rx="2" ry="2" />
+<text  x="658.88" y="719.5" ></text>
+</g>
+<g >
+<title>FIND (49 samples, 0.04%)</title><rect x="1128.0" y="421" width="0.4" height="15.0" fill="rgb(231,150,10)" rx="2" ry="2" />
+<text  x="1131.01" y="431.5" ></text>
+</g>
+<g >
+<title>EXPAND-NODES (116,806 samples, 86.58%)</title><rect x="168.3" y="805" width="1021.7" height="15.0" fill="rgb(209,31,43)" rx="2" ry="2" />
+<text  x="171.32" y="815.5" >EXPAND-NODES</text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (46 samples, 0.03%)</title><rect x="1118.1" y="309" width="0.4" height="15.0" fill="rgb(242,100,24)" rx="2" ry="2" />
+<text  x="1121.06" y="319.5" ></text>
+</g>
+<g >
+<title>EXPAND-NODES (88,871 samples, 65.88%)</title><rect x="405.6" y="757" width="777.3" height="15.0" fill="rgb(218,76,21)" rx="2" ry="2" />
+<text  x="408.58" y="767.5" >EXPAND-NODES</text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (3,102 samples, 2.30%)</title><rect x="1091.5" y="357" width="27.1" height="15.0" fill="rgb(234,20,33)" rx="2" ry="2" />
+<text  x="1094.47" y="367.5" >A..</text>
+</g>
+<g >
+<title>GENERATE-CHILDREN! (73,278 samples, 54.32%)</title><rect x="541.9" y="741" width="641.0" height="15.0" fill="rgb(246,122,50)" rx="2" ry="2" />
+<text  x="544.94" y="751.5" >GENERATE-CHILDREN!</text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (16 samples, 0.01%)</title><rect x="1111.7" y="149" width="0.2" height="15.0" fill="rgb(244,143,43)" rx="2" ry="2" />
+<text  x="1114.74" y="159.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (STATE) :IN GET-HEURISTIC-EVAL) (18 samples, 0.01%)</title><rect x="1189.3" y="757" width="0.1" height="15.0" fill="rgb(211,67,7)" rx="2" ry="2" />
+<text  x="1192.26" y="767.5" ></text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-REF/CHECK-BOUNDS (30 samples, 0.02%)</title><rect x="886.3" y="645" width="0.3" height="15.0" fill="rgb(236,214,23)" rx="2" ry="2" />
+<text  x="889.35" y="655.5" ></text>
+</g>
+<g >
+<title>AGGREGATE-HEIGHT (14 samples, 0.01%)</title><rect x="1183.8" y="725" width="0.1" height="15.0" fill="rgb(205,70,27)" rx="2" ry="2" />
+<text  x="1186.75" y="735.5" ></text>
+</g>
+<g >
+<title>ADJUSTED-PIECE (21 samples, 0.02%)</title><rect x="1186.1" y="693" width="0.2" height="15.0" fill="rgb(210,205,6)" rx="2" ry="2" />
+<text  x="1189.13" y="703.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (290 samples, 0.21%)</title><rect x="1133.5" y="517" width="2.5" height="15.0" fill="rgb(245,48,32)" rx="2" ry="2" />
+<text  x="1136.51" y="527.5" ></text>
+</g>
+<g >
+<title>FULL-SQUARE-P (260 samples, 0.19%)</title><rect x="539.3" y="693" width="2.3" height="15.0" fill="rgb(239,159,24)" rx="2" ry="2" />
+<text  x="542.32" y="703.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (83 samples, 0.06%)</title><rect x="1125.9" y="437" width="0.7" height="15.0" fill="rgb(239,107,31)" rx="2" ry="2" />
+<text  x="1128.90" y="447.5" ></text>
+</g>
+<g >
+<title>MERGE-PIECE (16 samples, 0.01%)</title><rect x="1186.6" y="693" width="0.2" height="15.0" fill="rgb(219,205,30)" rx="2" ry="2" />
+<text  x="1189.62" y="703.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (24,214 samples, 17.95%)</title><rect x="944.0" y="645" width="211.8" height="15.0" fill="rgb(254,116,47)" rx="2" ry="2" />
+<text  x="947.00" y="655.5" >ADD-IF-UNIQUE</text>
+</g>
+<g >
+<title>TWO-ARG-AND (18 samples, 0.01%)</title><rect x="655.7" y="677" width="0.1" height="15.0" fill="rgb(211,224,37)" rx="2" ry="2" />
+<text  x="658.67" y="687.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (185 samples, 0.14%)</title><rect x="1109.5" y="149" width="1.6" height="15.0" fill="rgb(225,110,4)" rx="2" ry="2" />
+<text  x="1112.47" y="159.5" ></text>
+</g>
+<g >
+<title>EQUAL-HASH (333 samples, 0.25%)</title><rect x="838.9" y="645" width="2.9" height="15.0" fill="rgb(248,212,34)" rx="2" ry="2" />
+<text  x="841.90" y="655.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (39 samples, 0.03%)</title><rect x="1146.2" y="565" width="0.3" height="15.0" fill="rgb(234,58,49)" rx="2" ry="2" />
+<text  x="1149.16" y="575.5" ></text>
+</g>
+<g >
+<title>VALID-POSITION-P (2,439 samples, 1.81%)</title><rect x="1161.2" y="677" width="21.3" height="15.0" fill="rgb(252,187,13)" rx="2" ry="2" />
+<text  x="1164.15" y="687.5" >V..</text>
+</g>
+<g >
+<title>REMOVE-DUPLICATE-POSITIONS (240 samples, 0.18%)</title><rect x="1186.8" y="693" width="2.1" height="15.0" fill="rgb(233,198,52)" rx="2" ry="2" />
+<text  x="1189.81" y="703.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (45 samples, 0.03%)</title><rect x="1119.8" y="357" width="0.4" height="15.0" fill="rgb(222,31,29)" rx="2" ry="2" />
+<text  x="1122.76" y="367.5" ></text>
+</g>
+<g >
+<title>TWO-ARG-AND (17 samples, 0.01%)</title><rect x="513.7" y="645" width="0.1" height="15.0" fill="rgb(243,75,25)" rx="2" ry="2" />
+<text  x="516.67" y="655.5" ></text>
+</g>
+<g >
+<title>GENERATE-CHILDREN! (92 samples, 0.07%)</title><rect x="1189.2" y="773" width="0.8" height="15.0" fill="rgb(218,9,20)" rx="2" ry="2" />
+<text  x="1192.20" y="783.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (19 samples, 0.01%)</title><rect x="1189.8" y="549" width="0.1" height="15.0" fill="rgb(239,58,6)" rx="2" ry="2" />
+<text  x="1192.76" y="559.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (66 samples, 0.05%)</title><rect x="1112.9" y="229" width="0.6" height="15.0" fill="rgb(224,134,20)" rx="2" ry="2" />
+<text  x="1115.95" y="239.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (120 samples, 0.09%)</title><rect x="1122.9" y="421" width="1.0" height="15.0" fill="rgb(206,41,53)" rx="2" ry="2" />
+<text  x="1125.89" y="431.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (334 samples, 0.25%)</title><rect x="1143.6" y="581" width="3.0" height="15.0" fill="rgb(224,201,29)" rx="2" ry="2" />
+<text  x="1146.63" y="591.5" ></text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (23 samples, 0.02%)</title><rect x="652.5" y="629" width="0.2" height="15.0" fill="rgb(250,25,54)" rx="2" ry="2" />
+<text  x="655.50" y="639.5" ></text>
+</g>
+<g >
+<title>PCL (31 samples, 0.02%)</title><rect x="909.2" y="645" width="0.3" height="15.0" fill="rgb(250,97,6)" rx="2" ry="2" />
+<text  x="912.20" y="655.5" ></text>
+</g>
+<g >
+<title>ASH (67 samples, 0.05%)</title><rect x="528.9" y="645" width="0.6" height="15.0" fill="rgb(251,18,33)" rx="2" ry="2" />
+<text  x="531.92" y="655.5" ></text>
+</g>
+<g >
+<title>TWO-ARG-AND (22 samples, 0.02%)</title><rect x="628.8" y="645" width="0.2" height="15.0" fill="rgb(232,58,50)" rx="2" ry="2" />
+<text  x="631.79" y="655.5" ></text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-REF/CHECK-BOUNDS (15 samples, 0.01%)</title><rect x="776.6" y="597" width="0.1" height="15.0" fill="rgb(235,180,33)" rx="2" ry="2" />
+<text  x="779.58" y="607.5" ></text>
+</g>
+<g >
+<title>TWO-ARG-AND (30 samples, 0.02%)</title><rect x="1174.8" y="645" width="0.3" height="15.0" fill="rgb(213,148,38)" rx="2" ry="2" />
+<text  x="1177.84" y="655.5" ></text>
+</g>
+<g >
+<title>FULL-SQUARE-P (302 samples, 0.22%)</title><rect x="626.3" y="661" width="2.7" height="15.0" fill="rgb(210,207,0)" rx="2" ry="2" />
+<text  x="629.34" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (20,020 samples, 14.84%)</title><rect x="974.4" y="613" width="175.1" height="15.0" fill="rgb(244,13,2)" rx="2" ry="2" />
+<text  x="977.42" y="623.5" >ADD-IF-UNIQUE</text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (16 samples, 0.01%)</title><rect x="512.8" y="645" width="0.1" height="15.0" fill="rgb(254,224,26)" rx="2" ry="2" />
+<text  x="515.76" y="655.5" ></text>
+</g>
+<g >
+<title>EQUALP (25 samples, 0.02%)</title><rect x="1145.9" y="517" width="0.2" height="15.0" fill="rgb(247,90,25)" rx="2" ry="2" />
+<text  x="1148.89" y="527.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (14 samples, 0.01%)</title><rect x="1188.3" y="245" width="0.2" height="15.0" fill="rgb(221,141,35)" rx="2" ry="2" />
+<text  x="1191.33" y="255.5" ></text>
+</g>
+<g >
+<title>RUN-SEARCHER (134,906 samples, 100.00%)</title><rect x="10.0" y="837" width="1180.0" height="15.0" fill="rgb(223,181,41)" rx="2" ry="2" />
+<text  x="13.00" y="847.5" >RUN-SEARCHER</text>
+</g>
+<g >
+<title>EQUALP (25 samples, 0.02%)</title><rect x="1148.8" y="533" width="0.2" height="15.0" fill="rgb(209,96,48)" rx="2" ry="2" />
+<text  x="1151.79" y="543.5" ></text>
+</g>
+<g >
+<title>COLUMN-HEIGHT (12 samples, 0.01%)</title><rect x="1189.3" y="725" width="0.1" height="15.0" fill="rgb(250,141,11)" rx="2" ry="2" />
+<text  x="1192.31" y="735.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (1,681 samples, 1.25%)</title><rect x="1100.9" y="293" width="14.7" height="15.0" fill="rgb(218,178,15)" rx="2" ry="2" />
+<text  x="1103.92" y="303.5" ></text>
+</g>
+<g >
+<title>PIECE-DOWN (22 samples, 0.02%)</title><rect x="901.5" y="677" width="0.2" height="15.0" fill="rgb(232,172,35)" rx="2" ry="2" />
+<text  x="904.49" y="687.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (142 samples, 0.11%)</title><rect x="1141.9" y="533" width="1.2" height="15.0" fill="rgb(216,201,34)" rx="2" ry="2" />
+<text  x="1144.90" y="543.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (15 samples, 0.01%)</title><rect x="1123.8" y="405" width="0.1" height="15.0" fill="rgb(226,163,42)" rx="2" ry="2" />
+<text  x="1126.77" y="415.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (89 samples, 0.07%)</title><rect x="1137.1" y="501" width="0.7" height="15.0" fill="rgb(210,169,22)" rx="2" ry="2" />
+<text  x="1140.06" y="511.5" ></text>
+</g>
+<g >
+<title>EXPAND-NODES (107,762 samples, 79.88%)</title><rect x="247.4" y="789" width="942.6" height="15.0" fill="rgb(220,64,43)" rx="2" ry="2" />
+<text  x="250.42" y="799.5" >EXPAND-NODES</text>
+</g>
+<g >
+<title>ADD-TO-SEEN (48 samples, 0.04%)</title><rect x="841.9" y="677" width="0.4" height="15.0" fill="rgb(215,200,43)" rx="2" ry="2" />
+<text  x="844.90" y="687.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (33 samples, 0.02%)</title><rect x="1116.0" y="261" width="0.3" height="15.0" fill="rgb(209,89,48)" rx="2" ry="2" />
+<text  x="1119.03" y="271.5" ></text>
+</g>
+<g >
+<title>PCL (28 samples, 0.02%)</title><rect x="885.5" y="629" width="0.3" height="15.0" fill="rgb(249,46,3)" rx="2" ry="2" />
+<text  x="888.55" y="639.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (151 samples, 0.11%)</title><rect x="1134.3" y="501" width="1.3" height="15.0" fill="rgb(233,97,21)" rx="2" ry="2" />
+<text  x="1137.32" y="511.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (119 samples, 0.09%)</title><rect x="1120.3" y="389" width="1.1" height="15.0" fill="rgb(240,217,16)" rx="2" ry="2" />
+<text  x="1123.32" y="399.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (35 samples, 0.03%)</title><rect x="1188.2" y="389" width="0.3" height="15.0" fill="rgb(218,166,50)" rx="2" ry="2" />
+<text  x="1191.16" y="399.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (125 samples, 0.09%)</title><rect x="1129.8" y="453" width="1.1" height="15.0" fill="rgb(218,225,49)" rx="2" ry="2" />
+<text  x="1132.84" y="463.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.ARG0.) :IN &quot;SYS:SRC (40 samples, 0.03%)</title><rect x="528.3" y="645" width="0.4" height="15.0" fill="rgb(209,42,8)" rx="2" ry="2" />
+<text  x="531.34" y="655.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::NEWVAL SB-KERNEL:INSTANCE) :IN SB-PCL::STRUCTURE-SLOTD-WRITER-FUNCTION) (14 samples, 0.01%)</title><rect x="908.0" y="661" width="0.1" height="15.0" fill="rgb(209,132,45)" rx="2" ry="2" />
+<text  x="910.98" y="671.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (13,273 samples, 9.84%)</title><rect x="1022.1" y="549" width="116.1" height="15.0" fill="rgb(213,129,50)" rx="2" ry="2" />
+<text  x="1025.10" y="559.5" >ADD-IF-UNIQUE</text>
+</g>
+<g >
+<title>HAIRY-DATA-VECTOR-REF/CHECK-BOUNDS (28 samples, 0.02%)</title><rect x="628.5" y="645" width="0.3" height="15.0" fill="rgb(221,1,12)" rx="2" ry="2" />
+<text  x="631.54" y="655.5" ></text>
+</g>
+<g >
+<title>FULL-SQUARE-P (351 samples, 0.26%)</title><rect x="883.7" y="661" width="3.1" height="15.0" fill="rgb(243,93,53)" rx="2" ry="2" />
+<text  x="886.71" y="671.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (21 samples, 0.02%)</title><rect x="1112.7" y="181" width="0.2" height="15.0" fill="rgb(229,111,38)" rx="2" ry="2" />
+<text  x="1115.70" y="191.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (367 samples, 0.27%)</title><rect x="1152.6" y="629" width="3.2" height="15.0" fill="rgb(211,108,39)" rx="2" ry="2" />
+<text  x="1155.57" y="639.5" ></text>
+</g>
+<g >
+<title>EQUALP (40 samples, 0.03%)</title><rect x="1158.5" y="581" width="0.3" height="15.0" fill="rgb(212,229,39)" rx="2" ry="2" />
+<text  x="1161.49" y="591.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (197 samples, 0.15%)</title><rect x="1150.4" y="597" width="1.8" height="15.0" fill="rgb(219,77,7)" rx="2" ry="2" />
+<text  x="1153.45" y="607.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (278 samples, 0.21%)</title><rect x="1128.7" y="485" width="2.5" height="15.0" fill="rgb(212,42,44)" rx="2" ry="2" />
+<text  x="1131.72" y="495.5" ></text>
+</g>
+<g >
+<title>GETHASH3 (38 samples, 0.03%)</title><rect x="905.4" y="645" width="0.3" height="15.0" fill="rgb(236,177,18)" rx="2" ry="2" />
+<text  x="908.36" y="655.5" ></text>
+</g>
+<g >
+<title>ASH (35 samples, 0.03%)</title><rect x="652.9" y="661" width="0.3" height="15.0" fill="rgb(219,51,10)" rx="2" ry="2" />
+<text  x="655.92" y="671.5" ></text>
+</g>
+<g >
+<title>(LABELS SB-IMPL::SXHASH-RECURSE :IN SXHASH) (26 samples, 0.02%)</title><rect x="878.8" y="565" width="0.2" height="15.0" fill="rgb(211,128,3)" rx="2" ry="2" />
+<text  x="881.81" y="575.5" ></text>
+</g>
+<g >
+<title>%MAKE-ARRAY (21 samples, 0.02%)</title><rect x="898.9" y="629" width="0.1" height="15.0" fill="rgb(222,211,23)" rx="2" ry="2" />
+<text  x="901.86" y="639.5" ></text>
+</g>
+<g >
+<title>OUTSIDE-WELL-P (509 samples, 0.38%)</title><rect x="1175.1" y="661" width="4.5" height="15.0" fill="rgb(222,86,5)" rx="2" ry="2" />
+<text  x="1178.10" y="671.5" ></text>
+</g>
+<g >
+<title>Some binary code (14 samples, 0.01%)</title><rect x="530.4" y="693" width="0.2" height="15.0" fill="rgb(234,63,38)" rx="2" ry="2" />
+<text  x="533.43" y="703.5" ></text>
+</g>
+<g >
+<title>ASH (25 samples, 0.02%)</title><rect x="541.1" y="677" width="0.2" height="15.0" fill="rgb(214,181,1)" rx="2" ry="2" />
+<text  x="544.09" y="687.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (18 samples, 0.01%)</title><rect x="1111.2" y="133" width="0.1" height="15.0" fill="rgb(214,223,12)" rx="2" ry="2" />
+<text  x="1114.16" y="143.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (10,648 samples, 7.89%)</title><rect x="1040.4" y="517" width="93.1" height="15.0" fill="rgb(225,62,50)" rx="2" ry="2" />
+<text  x="1043.38" y="527.5" >ADD-IF-UNIQUE</text>
+</g>
+<g >
+<title>EQUALP (12 samples, 0.01%)</title><rect x="1118.3" y="277" width="0.1" height="15.0" fill="rgb(254,90,49)" rx="2" ry="2" />
+<text  x="1121.34" y="287.5" ></text>
+</g>
+<g >
+<title>PCL (17 samples, 0.01%)</title><rect x="776.3" y="581" width="0.1" height="15.0" fill="rgb(224,119,53)" rx="2" ry="2" />
+<text  x="779.26" y="591.5" ></text>
+</g>
+<g >
+<title>BUMPINESS (15 samples, 0.01%)</title><rect x="1189.3" y="741" width="0.1" height="15.0" fill="rgb(214,168,47)" rx="2" ry="2" />
+<text  x="1192.28" y="751.5" ></text>
+</g>
+<g >
+<title>WELL-HEIGHT (114 samples, 0.08%)</title><rect x="1178.4" y="645" width="1.0" height="15.0" fill="rgb(236,47,8)" rx="2" ry="2" />
+<text  x="1181.45" y="655.5" ></text>
+</g>
+<g >
+<title>MIN-HEIGHT (365 samples, 0.27%)</title><rect x="773.7" y="645" width="3.2" height="15.0" fill="rgb(244,1,52)" rx="2" ry="2" />
+<text  x="776.66" y="655.5" ></text>
+</g>
+<g >
+<title>(FLET &quot;WRAPPER2&quot; :IN EQUIVALENT-PIECES) (25 samples, 0.02%)</title><rect x="1117.3" y="293" width="0.2" height="15.0" fill="rgb(243,166,53)" rx="2" ry="2" />
+<text  x="1120.26" y="303.5" ></text>
+</g>
+<g >
+<title>ASH (23 samples, 0.02%)</title><rect x="628.3" y="645" width="0.2" height="15.0" fill="rgb(245,4,3)" rx="2" ry="2" />
+<text  x="631.34" y="655.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (4,585 samples, 3.40%)</title><rect x="1081.3" y="405" width="40.1" height="15.0" fill="rgb(239,19,44)" rx="2" ry="2" />
+<text  x="1084.29" y="415.5" >ADD..</text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (202 samples, 0.15%)</title><rect x="1179.6" y="661" width="1.7" height="15.0" fill="rgb(219,226,23)" rx="2" ry="2" />
+<text  x="1182.56" y="671.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (53 samples, 0.04%)</title><rect x="1112.5" y="213" width="0.4" height="15.0" fill="rgb(246,11,5)" rx="2" ry="2" />
+<text  x="1115.49" y="223.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (205 samples, 0.15%)</title><rect x="1126.9" y="469" width="1.8" height="15.0" fill="rgb(229,30,37)" rx="2" ry="2" />
+<text  x="1129.92" y="479.5" ></text>
+</g>
+<g >
+<title>(LAMBDA (SB-PCL::.PV. SB-PCL::.NEXT-METHOD-CALL. SB-KERNEL:INSTANCE) :IN SB-PCL::MAKE-STD-READER-METHOD-FUNCTION) (16 samples, 0.01%)</title><rect x="907.8" y="661" width="0.2" height="15.0" fill="rgb(221,129,53)" rx="2" ry="2" />
+<text  x="910.82" y="671.5" ></text>
+</g>
+<g >
+<title>WELL-HEIGHT (16 samples, 0.01%)</title><rect x="530.3" y="677" width="0.1" height="15.0" fill="rgb(207,177,49)" rx="2" ry="2" />
+<text  x="533.29" y="687.5" ></text>
+</g>
+<g >
+<title>FIND (56 samples, 0.04%)</title><rect x="1137.3" y="485" width="0.5" height="15.0" fill="rgb(238,80,3)" rx="2" ry="2" />
+<text  x="1140.34" y="495.5" ></text>
+</g>
+<g >
+<title>EQUALP (24 samples, 0.02%)</title><rect x="1137.6" y="469" width="0.2" height="15.0" fill="rgb(253,199,50)" rx="2" ry="2" />
+<text  x="1140.62" y="479.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (33 samples, 0.02%)</title><rect x="1137.8" y="517" width="0.3" height="15.0" fill="rgb(228,118,36)" rx="2" ry="2" />
+<text  x="1140.83" y="527.5" ></text>
+</g>
+<g >
+<title>ADD-IF-UNIQUE (15 samples, 0.01%)</title><rect x="1110.2" y="53" width="0.2" height="15.0" fill="rgb(217,117,31)" rx="2" ry="2" />
+<text  x="1113.25" y="63.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (30 samples, 0.02%)</title><rect x="1140.2" y="533" width="0.2" height="15.0" fill="rgb(220,154,11)" rx="2" ry="2" />
+<text  x="1143.15" y="543.5" ></text>
+</g>
+<g >
+<title>PIECE-ABSOLUTE-COORDS (30 samples, 0.02%)</title><rect x="1133.2" y="485" width="0.2" height="15.0" fill="rgb(216,145,15)" rx="2" ry="2" />
+<text  x="1136.15" y="495.5" ></text>
+</g>
+<g >
+<title>NUM-HOLES (1,272 samples, 0.94%)</title><rect x="644.8" y="709" width="11.1" height="15.0" fill="rgb(254,56,36)" rx="2" ry="2" />
+<text  x="647.76" y="719.5" ></text>
+</g>
+<g >
+<title>EQUIVALENT-PIECES (12 samples, 0.01%)</title><rect x="1110.8" y="117" width="0.1" height="15.0" fill="rgb(216,99,11)" rx="2" ry="2" />
+<text  x="1113.79" y="127.5" ></text>
+</g>
+<g >
+<title>BRAID.LISP&quot;) (40 samples, 0.03%)</title><rect x="528.3" y="613" width="0.4" height="15.0" fill="rgb(236,110,4)" rx="2" ry="2" />
+<text  x="531.34" y="623.5" ></text>
+</g>
+<g >
+<title>%MAP-FOR-EFFECT-ARITY-1 (19 samples, 0.01%)</title><rect x="1111.4" y="149" width="0.2" height="15.0" fill="rgb(220,108,42)" rx="2" ry="2" />
+<text  x="1114.41" y="159.5" ></text>
+</g>
+</g>
+</svg>
