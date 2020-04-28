@@ -92,3 +92,28 @@ Evaluation took:
   100.18% CPU
   199,223,121,532 processor cycles
   45,862,361,168 bytes consed
+
+#### Attempt the fifth
+Added multi-threading. Big speed-up, but strange decrease in score. May have changed the semantics. Or they may have been wrong before. It could be a weirdness around remaining-depth. Need to think through the logic of before/after and figure out which of them is wrong (if any).
+
+
+Output:
+
+LOVETRIS> (time
+             (run-searcher (lambda (state)
+                             (make-instance 'beam-searcher
+                                            :disable-beam t
+                                            :search-depth 4
+                                            :heuristic-eval (get-heuristic-eval -0.1 1.0 -0.4 -0.4)
+                                            :start-state state
+                                            :num-threads 4))))
+Evaluation took:
+  21.018 seconds of real time
+  69.759467 seconds of total run time (68.713105 user, 1.046362 system)
+  [ Run times consist of 2.326 seconds GC time, and 67.434 seconds non-GC time. ]
+  331.90% CPU
+  46,409,056,544 processor cycles
+  23,370,606,672 bytes consed
+  
+6
+"AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAAA08AAAAAAAAA56AAAAAAA95AAAAAAA8EAAAAAA5A6AAAAAA59AAAAAABAAAAAAA08A8AAAAAAA0BAAAAAAA82EAAAAA83AAAAA00BAAAAAAAAA5AAAAAAEFBAAAAAA56AAAAA8EFAAAAA5B5AAAAA9EAAAAA808BAAAAAAAAAAA0EAAAAA66AAAA576AAAA802EAAAAA80AAAAA96AAAAAAAA80C8AAAAA2AAAA56AAA822AAAAAAA66AAA56AAA029AAA03F8BAAA82AA68AA95AAA5AA80AAAA80C8AAA576"

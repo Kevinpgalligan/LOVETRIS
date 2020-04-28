@@ -5,23 +5,14 @@ An AI to play this Tetris variant: https://qntm.org/files/hatetris/hatetris.html
 May need to do some special stuff to get the trivial-gamekit package working, see: https://github.com/borodust/trivial-gamekit
 
 ### TODO
-1. ~~Core data structures (board, pieces, piece orientations, piece moves)~~
-2. ~~Algorithm to find valid positions of a piece.~~
-3. ~~Hatetris AI: look at all possible moves for all possible pieces, pick the one the maximises the minimum possible height. Tie breaks resolved by order of pieces. I think. Need to review the HATETRIS code.~~
-4. ~~GUI that lets player pick moves (need to add "on-start" and "on-end" functions to the game interface that allow GUI to be booted up / shut down; implement a version of "place-piece" that gets the player to manipulate the piece through the GUI; possibly adjust what the game interface returns at the end, as right now it just returns the final state, which does not allow replays).~~
-5. ~~Play through some games myself to test it (incl. world record games). Hopefully this won't turn up any bugs.~~
-6. ~~Greedy search (algorithm and heuristics).~~
-7. ~~Beam search.~~
-8. ~~Some way of replaying games, in order to analyze AI behaviour.~~
-9. ~~Analyze redundancy in beam search, i.e. how often do the branches converge. What percentage of states are duplicates in the fully-expanded tree. Depending on the results of this analysis, it might be worth implementing caching to avoid wasting time on duplicate paths / to encourage diversity.~~
-10. ~~Fill in the article in chronological order: write what I can / make gameplay videos; implement random search, show video; implement blind greedy search, show video.~~
-11. ~~Try again with increased heap size, & also hint to compiler (set children to nil).~~
-12. Low-hanging fruit optimisation, if such fruit exists. Possible candidates: 1) ~~don't recalculate placement of worst piece, should save 1/8 of the work in possible-next-states.~~ 2) remove-duplicate-positions is taking up 20% of the time, make that shit more efficient. 3) add type hints; I suspect that this could result in a dramatic improvement. 4) multi-threading.
-13. Implement evolutionary stuff (generic version) for optimising greedy search, update article with the best greedy parameters I can find (video, explanation).
-14. Beam search state caching.
-15. Optimise / profiling / multi-threading, find best combination of beam width & search depth.
-16. Evolve better parameters for beam search.
-17. Write up final beam search results. If record-breaking, leave it at that. If not, move on to Monte Carlo.
+1. ~~Multi-threading (cl-threadpool is shit, e.g. no way to wait for jobs to finish. It just doesn't have a rich API. Better to use custom bordeaux-threads solution, I guess).~~ BUT: think through semantics before/after, understand why the score changed.
+2. Implement evolutionary algorithm for optimising greedy search, update article with the best greedy parameters I can find (video, explanation).
+3. (Possibility) Beam search state caching, would avoid wasteful computation.
+4. Find best combination of beam width & search depth.
+5. Evolve better parameters for beam search (most of the work should have been done in step 2).
+6. Write up beam search results.
+7. Use existing records as a runway.
+8. Try Monte Carlo Tree Search.
 
 ### Credits
 Jeffrey Massung for his queue implementation (https://github.com/massung/queue), which I copy/pasted here (with the addition of a new method).

@@ -4,7 +4,7 @@
   ((beam-width
     :initarg :beam-width
     :initform 2
-    :reader beam-width
+    :accessor beam-width
     :documentation "How many states to explore at each depth of the search tree.")
    (disable-beam
     :initarg :disable-beam
@@ -22,21 +22,28 @@
     :initform (error "Must supply heuristic evaluator for beam search.")
     :documentation "A function that estimates the 'goodness' of a state, should return a real number. Higher is better.")
    (search-tree
-    :accessor search-tree)))
+    :accessor search-tree)
+   (num-threads
+    :initarg :num-threads
+    :initform 1
+    :reader num-threads
+    :documentation "How many threads to use for expanding the search tree.")))
 
 (defmethod initialize-instance :after ((searcher beam-searcher)
                                        &key start-state)
   (when (not start-state)
     (error "No state to start from."))
-  (setf (search-tree searcher) (make-node start-state)))
+  (setf (search-tree searcher) (make-node start-state))
+  (when (disable-beam searcher)
+    (setf (beam-width searcher) nil)))
 
 (defmethod advance ((searcher beam-searcher))
-  (expand-nodes (search-tree searcher)
-                (search-depth searcher)
-                (heuristic-eval searcher)
-                (if (disable-beam searcher)
-                    nil
-                    (beam-width searcher)))
+  (expand-nodes! (list (search-tree searcher))
+                 (search-depth searcher)
+                 (heuristic-eval searcher)
+                 (beam-width searcher)
+                 (num-threads searcher))
+  (propagate-heuristic-values! (search-tree searcher))
   (let ((next-node
           (alexandria:extremum (children (search-tree searcher))
                                #'>
@@ -53,29 +60,50 @@
     (setf (search-tree searcher) next-node)
     (state next-node)))
 
-;; We use this to find the path through the search tree that
-;; has the best heuristic score at the end of it.
-(defun expand-nodes (current-node remaining-depth heuristic-eval beam-width)
-  (setf (heuristic-value current-node)
-        (if (= 0 remaining-depth)
-            ;; We've reached the bottom of the search tree, resort
-            ;; to direct heuristic evaluation.
-            (funcall heuristic-eval (state current-node))
-            ;; Haven't reached the bottom yet, expand further.
-            (progn
-              (when (not (children current-node))
-                (generate-children! current-node heuristic-eval beam-width))
-              ;; Might be a dead end (i.e. game over), so just use
-              ;; heuristic value.
-              (if (children current-node)
-                  (apply #'max
-                         (mapcar (lambda (child)
-                                   (expand-nodes child
+(defun expand-nodes! (nodes remaining-depth heuristic-eval beam-width num-threads)
+  (cond
+    ;; Reached the end of the tree before it made sense
+    ;; to use threads. Heuristic values of nodes have
+    ;; already been calculated during expansion step, so
+    ;; do nothing.
+    ((= remaining-depth 0)
+     nil)
+    ;; Divvy up the nodes among the threads for further
+    ;; expansion.
+    ((<= num-threads (length nodes))
+     (let ((nodes-lock (bt:make-lock)))
+       (let ((threads
+               (loop for i below num-threads collect
+                     (bt:make-thread
+                      (lambda ()
+                        (loop (let ((node
+                                      (bt:with-lock-held (nodes-lock)
+                                        (pop nodes))))
+                                (if (null node)
+                                    (return)
+                                    (add-leaves! node
                                                  (1- remaining-depth)
                                                  heuristic-eval
-                                                 beam-width))
-                                 (children current-node)))
-                  (heuristic-value current-node))))))
+                                                 beam-width)))))))))
+         ;; Now wait for the threads to terminate.
+         (loop for thread in threads do
+               (bt:join-thread thread)))))
+    ;; Still not enough nodes to share between the threads, continue
+    ;; breadth-first search to the next layer of the tree.
+    (t
+     (loop for node in nodes do
+           (when (not (children node))
+             ;; There is some waste here... we call generate-children!
+             ;; multiple times on dead-end nodes. Could add an "expanded"
+             ;; flag to the node class.
+             (generate-children! node heuristic-eval beam-width)))
+     (expand-nodes! (apply #'append
+                           (mapcar #'children
+                                   nodes))
+                    (1- remaining-depth)
+                    heuristic-eval
+                    beam-width
+                    num-threads))))
 
 (defun generate-children! (node heuristic-eval beam-width)
   (setf (children node)
@@ -95,3 +123,18 @@
               (loop for child in possible-child-nodes
                     for i from 0 below beam-width
                     collect child)))))
+
+(defun add-leaves! (node remaining-depth heuristic-eval beam-width)
+  (when (< 0 remaining-depth)
+    (when (not (children node))
+      (generate-children! node heuristic-eval beam-width))
+    (loop for child in (children node) do
+          (add-leaves! child (1- remaining-depth) heuristic-eval beam-width))))
+
+(defun propagate-heuristic-values! (node)
+  (if (not (children node))
+      (heuristic-value node)
+      (setf (heuristic-value node)
+            (apply #'max
+                   (mapcar #'propagate-heuristic-values!
+                           (children node))))))

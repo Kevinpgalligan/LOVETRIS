@@ -6,7 +6,9 @@
 (defsystem lovetris
   :license "MIT"
   :author "Kevin Galligan"
-  :depends-on (:alexandria :trivial-gamekit)
+  :depends-on (:alexandria
+               :trivial-gamekit
+               :bordeaux-threads)
   :pathname "src"
   :serial t
   :components ((:file "package")
