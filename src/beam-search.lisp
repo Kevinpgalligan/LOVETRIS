@@ -82,7 +82,7 @@
                                 (if (null node)
                                     (return)
                                     (add-leaves! node
-                                                 (1- remaining-depth)
+                                                 remaining-depth
                                                  heuristic-eval
                                                  beam-width)))))))))
          ;; Now wait for the threads to terminate.

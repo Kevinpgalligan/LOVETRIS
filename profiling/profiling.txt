@@ -94,10 +94,32 @@ Evaluation took:
   45,862,361,168 bytes consed
 
 #### Attempt the fifth
-Added multi-threading. Big speed-up, but strange decrease in score. May have changed the semantics. Or they may have been wrong before. It could be a weirdness around remaining-depth. Need to think through the logic of before/after and figure out which of them is wrong (if any).
+Added multi-threading, using 4 threads on this crappy lil laptop. Just about twice as fast. Wouldn't expect it to be 4 times faster because the threads have to switch to other tasks, not all of the code is multi-threaded, and even the part that IS multi-threaded does not split the work exactly evenly among the threads (4 threads, 17 tasks, 1 thread gets 5 tasks while the others get 4. That 1 thread is a bottleneck).
 
 
-Output:
+Output, run for 5 moves:
+
+LOVETRIS> (time
+             (run-searcher (lambda (state)
+                             (make-instance 'beam-searcher
+                                            :disable-beam t
+                                            :search-depth 4
+                                            :heuristic-eval (get-heuristic-eval -0.1 1.0 -0.4 -0.4)
+                                            :start-state state
+                                            :num-threads 4))
+                           5))
+Evaluation took:
+  41.839 seconds of real time
+  133.822843 seconds of total run time (131.889528 user, 1.933315 system)
+  [ Run times consist of 5.013 seconds GC time, and 128.810 seconds non-GC time. ]
+  319.85% CPU
+  92,380,428,098 processor cycles
+  45,800,210,400 bytes consed
+  
+0
+"AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAA95DAAAAAAAA6"
+
+Output, run until end of game:
 
 LOVETRIS> (time
              (run-searcher (lambda (state)
@@ -108,12 +130,13 @@ LOVETRIS> (time
                                             :start-state state
                                             :num-threads 4))))
 Evaluation took:
-  21.018 seconds of real time
-  69.759467 seconds of total run time (68.713105 user, 1.046362 system)
-  [ Run times consist of 2.326 seconds GC time, and 67.434 seconds non-GC time. ]
-  331.90% CPU
-  46,409,056,544 processor cycles
-  23,370,606,672 bytes consed
+  495.426 seconds of real time
+  1632.533584 seconds of total run time (1609.440973 user, 23.092611 system)
+  [ Run times consist of 57.740 seconds GC time, and 1574.794 seconds non-GC time. ]
+  329.52% CPU
+  107 lambdas converted
+  1,093,911,154,470 processor cycles
+  540,842,578,112 bytes consed
   
-6
-"AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAAA08AAAAAAAAA56AAAAAAA95AAAAAAA8EAAAAAA5A6AAAAAA59AAAAAABAAAAAAA08A8AAAAAAA0BAAAAAAA82EAAAAA83AAAAA00BAAAAAAAAA5AAAAAAEFBAAAAAA56AAAAA8EFAAAAA5B5AAAAA9EAAAAA808BAAAAAAAAAAA0EAAAAA66AAAA576AAAA802EAAAAA80AAAAA96AAAAAAAA80C8AAAAA2AAAA56AAA822AAAAAAA66AAA56AAA029AAA03F8BAAA82AA68AA95AAA5AA80AAAA80C8AAA576"
+8
+"AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAA95DAAAAAAAA6AAAAA95DAAAAAAA9AAAAAA88A6AAAAAA22229AAAAAAAAAAAA2229AAAAA888FB2AEAAAAA8888AAAAAA95DAAAAAAA22AAAAAAA6AAAAA9AAAAA576AAAAAAAAAA2229AAAA888FB2AEAAAA8888AAAAA95DAAAAAA22AAAA576AAAAA80C8AAAAAAAA9AAAAA5AAAAAAAAA2228AAAAA220EAAAA83FAAAAA96AAA9AAA8883AAA8BBEEAAA56AAA8882AAA8AAAA7AAA567AAA8A2BEAAA023AA83FAAAA95AAA9AA803AAA8BA80C2A"
