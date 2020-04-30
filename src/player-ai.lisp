@@ -70,7 +70,16 @@
    (children
     :initarg :children
     :initform nil
-    :accessor children)))
+    :reader children)
+   (expanded
+    :initarg :expanded
+    :initform nil
+    :accessor expanded)))
+
+(defun (setf children) (child-nodes node)
+  (setf (slot-value node 'children) child-nodes)
+  ;; If we add children to a node, also mark it as expanded.
+  (setf (expanded node) t))
 
 (defun make-node (state &key heuristic-value)
   (make-instance 'node

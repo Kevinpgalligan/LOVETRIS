@@ -6,7 +6,7 @@ May need to do some special stuff to get the trivial-gamekit package working, se
 
 ### TODO
 1. ~~Multi-threading to speed up search.~~
-2. (Easy) Improve node API, differentiate between having no children and children not having been added yet.
+2. ~~(Easy) Improve node API, differentiate between having no children and children not having been added yet.~~
 3. (Maybe)(Medium) Beam search state caching, would avoid wasteful computation. Might be tricky to share the cache between threads, even though SBCL seems to come with a concurrent hash table. Can you attempt to set and see if it was already set, at the same time?
 4. (Hard) Implement evolutionary algorithm for optimising greedy search, update article with the best greedy parameters I can find (video, explanation).
 5. (Easy) Find best combination of beam width & search depth.

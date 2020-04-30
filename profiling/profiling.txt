@@ -140,3 +140,29 @@ Evaluation took:
   
 8
 "AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAA95DAAAAAAAA6AAAAA95DAAAAAAA9AAAAAA88A6AAAAAA22229AAAAAAAAAAAA2229AAAAA888FB2AEAAAAA8888AAAAAA95DAAAAAAA22AAAAAAA6AAAAA9AAAAA576AAAAAAAAAA2229AAAA888FB2AEAAAA8888AAAAA95DAAAAAA22AAAA576AAAAA80C8AAAAAAAA9AAAAA5AAAAAAAAA2228AAAAA220EAAAA83FAAAAA96AAA9AAA8883AAA8BBEEAAA56AAA8882AAA8AAAA7AAA567AAA8A2BEAAA023AA83FAAAA95AAA9AA803AAA8BA80C2A"
+
+
+#### Attempt the sixth
+Better distribution of work across threads results in further ~5% speed-up. Same amount of work is performed, it's just done in a more parallel fashion.
+
+
+Output:
+
+LOVETRIS> (time
+             (run-searcher (lambda (state)
+                             (make-instance 'beam-searcher
+                                            :disable-beam t
+                                            :search-depth 4
+                                            :heuristic-eval (get-heuristic-eval -0.1 1.0 -0.4 -0.4)
+                                            :start-state state
+                                            :num-threads 4))))
+Evaluation took:
+  474.201 seconds of real time
+  1631.061262 seconds of total run time (1606.307788 user, 24.753474 system)
+  [ Run times consist of 62.317 seconds GC time, and 1568.745 seconds non-GC time. ]
+  343.96% CPU
+  1,047,045,621,770 processor cycles
+  540,864,774,752 bytes consed
+
+8
+"AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAA95DAAAAAAAA6AAAAA95DAAAAAAA9AAAAAA88A6AAAAAA22229AAAAAAAAAAAA2229AAAAA888FB2AEAAAAA8888AAAAAA95DAAAAAAA22AAAAAAA6AAAAA9AAAAA576AAAAAAAAAA2229AAAA888FB2AEAAAA8888AAAAA95DAAAAAA22AAAA576AAAAA80C8AAAAAAAA9AAAAA5AAAAAAAAA2228AAAAA220EAAAA83FAAAAA96AAA9AAA8883AAA8BBEEAAA56AAA8882AAA8AAAA7AAA567AAA8A2BEAAA023AA83FAAAA95AAA9AA803AAA8BA80C2A"

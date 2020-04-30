@@ -61,49 +61,48 @@
     (state next-node)))
 
 (defun expand-nodes! (nodes remaining-depth heuristic-eval beam-width num-threads)
-  (cond
-    ;; Reached the end of the tree before it made sense
-    ;; to use threads. Heuristic values of nodes have
-    ;; already been calculated during expansion step, so
-    ;; do nothing.
-    ((= remaining-depth 0)
-     nil)
-    ;; Divvy up the nodes among the threads for further
-    ;; expansion.
-    ((<= num-threads (length nodes))
-     (let ((nodes-lock (bt:make-lock)))
-       (let ((threads
-               (loop for i below num-threads collect
-                     (bt:make-thread
-                      (lambda ()
-                        (loop (let ((node
-                                      (bt:with-lock-held (nodes-lock)
-                                        (pop nodes))))
-                                (if (null node)
-                                    (return)
-                                    (add-leaves! node
-                                                 remaining-depth
-                                                 heuristic-eval
-                                                 beam-width)))))))))
-         ;; Now wait for the threads to terminate.
-         (loop for thread in threads do
-               (bt:join-thread thread)))))
-    ;; Still not enough nodes to share between the threads, continue
-    ;; breadth-first search to the next layer of the tree.
-    (t
-     (loop for node in nodes do
-           (when (not (children node))
-             ;; There is some waste here... we call generate-children!
-             ;; multiple times on dead-end nodes. Could add an "expanded"
-             ;; flag to the node class.
-             (generate-children! node heuristic-eval beam-width)))
-     (expand-nodes! (apply #'append
-                           (mapcar #'children
-                                   nodes))
-                    (1- remaining-depth)
-                    heuristic-eval
-                    beam-width
-                    num-threads))))
+  (when (> remaining-depth 0)
+    ;; Divide nodes as evenly as possible among threads for expansion, we
+    ;; continue the single-threaded expansion of any remaining nodes.
+    (let* ((split-index (* num-threads (floor (length nodes) num-threads)))
+           (nodes-for-threads (subseq nodes 0 split-index))
+           (leftover-nodes (subseq nodes split-index)))
+      (when nodes-for-threads
+        (expand-with-threads nodes-for-threads
+                             remaining-depth
+                             heuristic-eval
+                             beam-width
+                             num-threads))
+      (when leftover-nodes
+        (loop for node in leftover-nodes do
+              (when (not (expanded node))
+                (generate-children! node heuristic-eval beam-width)))
+        (expand-nodes! (apply #'append
+                              (mapcar #'children
+                                      leftover-nodes))
+                       (1- remaining-depth)
+                       heuristic-eval
+                       beam-width
+                       num-threads)))))
+
+(defun expand-with-threads (nodes remaining-depth heuristic-eval beam-width num-threads)
+  (let ((nodes-lock (bt:make-lock)))
+    (let ((threads
+            (loop for i below num-threads collect
+                  (bt:make-thread
+                   (lambda ()
+                     (loop (let ((node
+                                   (bt:with-lock-held (nodes-lock)
+                                     (pop nodes))))
+                             (if (null node)
+                                 (return)
+                                 (add-leaves! node
+                                              remaining-depth
+                                              heuristic-eval
+                                              beam-width)))))))))
+      ;; Now wait for the threads to terminate.
+      (loop for thread in threads do
+            (bt:join-thread thread)))))
 
 (defun generate-children! (node heuristic-eval beam-width)
   (setf (children node)
@@ -126,7 +125,7 @@
 
 (defun add-leaves! (node remaining-depth heuristic-eval beam-width)
   (when (< 0 remaining-depth)
-    (when (not (children node))
+    (when (not (expanded node))
       (generate-children! node heuristic-eval beam-width))
     (loop for child in (children node) do
           (add-leaves! child (1- remaining-depth) heuristic-eval beam-width))))
