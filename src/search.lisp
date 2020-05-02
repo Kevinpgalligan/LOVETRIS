@@ -2,7 +2,7 @@
 
 (in-package lovetris)
 
-(defun run-searcher (searcher-init &optional max-states)
+(defun run-searcher (searcher-init &key max-states)
   "Returns final score and hex-encoded sequence of moves."
   (let* ((i 0)
          (state (make-state))

@@ -10,7 +10,23 @@
 ;;;; be the coefficients of the equation.
 
 (defpackage :genetic
-  (:use :cl))
+  (:use :cl)
+  (:export
+   #:evolve-random
+   
+   ;; Used with population.
+   #:best-solution
+   #:fitness-history
+   #:solutions
+   #:size
+
+   ;; Attributes of solutions.
+   #:genotype
+   #:fitness
+
+   #:eval-fitness
+   #:crossover
+   #:mutate))
 
 (in-package genetic)
 

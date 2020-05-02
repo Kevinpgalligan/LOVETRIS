@@ -19,4 +19,4 @@
                (:file "beam-search")
                (:file "play")
                (:file "genetic")
-               (:file "genetic-example")))
+               (:file "train")))

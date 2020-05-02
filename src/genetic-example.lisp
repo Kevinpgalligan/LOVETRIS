@@ -31,14 +31,3 @@
                  :rounds 100
                  :operations '((mutation 90)
                                (elitism 10))))
-
-(defun plot-fitness (population)
-  (vgplot:plot (apply #'append
-                      (loop for fs in (fitness-history population)
-                            for i = 0 then (1+ i)
-                            collect (loop repeat (length fs)
-                                          collect i)))
-               (apply #'append
-                      (fitness-history population))
-               "+;"))
-
