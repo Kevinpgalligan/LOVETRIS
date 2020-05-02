@@ -1,116 +1,169 @@
-(in-package lovetris)
+;;;; Optimisation by genetic algorithm.
+;;;;
+;;;; What must be defined to use it:
+;;;;  - a genotype class, implementing the methods below.
+;;;;  - a no-args function that returns a random genotype.
+;;;;
+;;;; By genotype, I mean the properties of a solution.
+;;;; For example, in a solution to maximize the fit of a
+;;;; quadratic equation to some datapoints, the genotype would
+;;;; be the coefficients of the equation.
 
-(defstruct individual life fitness)
-(defstruct result best population fitness-datapoints)
-(defstruct fitness-datapoint p0 p50 p100)
+(defpackage :genetic
+  (:use :cl))
 
-(defun evolve (target &key result (pop-size 100) (states-to-eval 100))
-  (if (null result)
-      (pop-to-result (random-population target pop-size states-to-eval) (list))
-      (pop-to-result (evolve-population (result-population result) target pop-size states-to-eval)
-                     (result-fitness-datapoints result))))
+(in-package genetic)
 
-(defun pop-to-result (population current-fitness-datapoints)
-  (make-result
-   :best (first (last population))
-   :population population
-   :fitness-datapoints (append current-fitness-datapoints
-                               (list (get-fitness-datapoint population)))))
+;;; Genotype class must be implemented with definitions
+;;; of these methods.
+(defgeneric eval-fitness (genotype)
+  (:documentation "Returns fitness score of genotype."))
+(defgeneric crossover (genotype1 genotype2)
+  (:documentation "Combines 2 genotypes to make a new one."))
+(defgeneric mutate (genotype)
+  (:documentation "Returns a randomly modified version of the given genotype."))
 
-(defun evolve-population (population target pop-size states-to-eval)
-  (let* ((elites (floor pop-size 5))
-         (crossovers (floor pop-size 2))
-         (mutants (- pop-size elites crossovers)))
-    (order-individuals
-     (append
-      (last population elites)
-      (loop repeat crossovers
-            collect
-            (let ((crossover-life
-                    (apply #'crossover
-                           (mapcar #'individual-life
-                                   (list (select-random population pop-size)
-                                         (select-random population pop-size))))))
-              (make-individual :life crossover-life
-                               :fitness (evaluate-fitness crossover-life target states-to-eval))))
-      (loop repeat mutants
-            collect
-            (let ((mutated-life (mutate (individual-life (select-random population pop-size)))))
-              (make-individual :life mutated-life
-                               :fitness (evaluate-fitness mutated-life target states-to-eval))))))))
+(defclass solution ()
+  ((genotype
+    :initarg :genotype
+    :initform (error "Must provide genotype.")
+    :reader genotype)
+   (fitness
+    :initarg :fitness
+    :initform (error "Must provide solution's fitness score.")
+    :reader fitness)))
 
-(defun select-random (population pop-size)
-  ;; Rank-based probability.
-  (let* ((proportion-sum (/ (* pop-size (1+ pop-size)) 2))
-         (choice (random proportion-sum)))
-    (loop for n from 1 upto pop-size
-          for individual in population
-          for sum = 1 then (+ sum n)
-          do (when (> sum choice)
-               (return individual)))))
+(defclass population ()
+  ((solutions
+    :initarg :solutions
+    :initform (error "Must provide initial solutions.")
+    :accessor solutions
+    :documentation "The current solutions in the population.")
+   (size
+    :reader size)
+   (fitness-history
+    :initform nil
+    :accessor fitness-history)))
 
-(defun crossover (l1 l2)
-  (let* ((rows (life-rows l1))
-         (cols (life-cols l1))
-         (new-grid (alexandria:copy-array (life-grid l1))))
-    (loop for i from 0 upto (1- rows) do
-          (loop for j from 0 upto (1- cols) do
-                (when (and (not (equalp (life-get-cell l1 i j) (life-get-cell l2 i j)))
-                           (= (random 2) 0))
-                  ;; If the two lives are not the same in this cell, make a random
-                  ;; choice between them.
-                  (setf (aref new-grid i j) (life-get-cell l2 i j)))))
-    (make-life :grid new-grid :rows rows :cols cols)))
+(defmethod initialize-instance :after ((population population) &key)
+  (add-to-fitness-history population (solutions population))
+  (setf (slot-value population 'size) (length (solutions population))))
 
-(defun mutate (life)
-  (let* ((rows (life-rows life))
-         (cols (life-cols life))
-         (new-grid (alexandria:copy-array (life-grid life))))
-    (loop for i from 0 upto (1- rows) do
-          (loop for j from 0 upto (1- cols) do
-                (when (= 0 (random 4)) ; 25% mutation rate
-                  (setf (aref new-grid i j)
-                        (if (equalp DEAD (life-get-cell life i j))
-                            LIVE
-                            DEAD)))))
-    (make-life :grid new-grid :rows rows :cols cols)))
+(defun add-to-fitness-history (population solutions)
+  (setf (fitness-history population)
+        (append (fitness-history population)
+                (list (mapcar #'fitness solutions)))))
 
-(defun get-fitness-datapoint (population)
-  (make-fitness-datapoint
-   :p0 (individual-fitness (first population)) 
-   :p50 (individual-fitness (middle-element population))
-   :p100 (individual-fitness (first (last population)))))
+(defun best-solution (population)
+  (alexandria:extremum (solutions population)
+                       #'>
+                       :key #'fitness))
 
-(defun middle-element (list)
-  (let ((length (list-length list)))
-    (if (zerop length)
-        nil
-        (nth (floor length 2) list))))
+(defun update-solutions! (population new-solutions)
+  (setf (solutions population) new-solutions)
+  (add-to-fitness-history population new-solutions))
 
-(defun random-population (target pop-size states-to-eval)
-  (order-individuals
-   (loop for _ from 1 upto pop-size collect
-         (random-individual target states-to-eval))))
+(defun evolve-random (random-genotype
+                      &key
+                        (pop-size 100)
+                        rounds
+                        operations)
+  "Evolve solutions starting from a random population.
 
-(defun order-individuals (individuals)
-  ;; Sort from highest fitness score (worst fitness) to lowest.
-  (sort individuals #'> :key #'individual-fitness))
+=== Parameters ===
+RANDOM-GENOTYPE: a function that returns a random genotype.
+POP-SIZE: how many solutions to keep in the population.
+ROUNDS: how many rounds of evolution to run, see #'evolve for default.
+OPERATIONS: proportion of new population to form using each operation type.
+            See #'evolve for default.
 
-(defun random-individual (target states-to-eval)
-  (let ((life (random-life (life-rows target) (life-cols target))))
-    (make-individual :life life
-                     :fitness (evaluate-fitness life target states-to-eval))))
+=== Returns ===
+The evolved population."
+  (evolve (make-instance
+           'population
+           :solutions (mapcar
+                       (lambda (genotype)
+                         (make-instance 'solution
+                                        :genotype genotype
+                                        :fitness (eval-fitness genotype)))
+                       (loop for i below pop-size collect
+                             (funcall random-genotype))))
+          rounds
+          operations))
 
-(defun evaluate-fitness (life target states-to-eval)
-  (loop for state from 1 upto states-to-eval
-        for curr-life = life then (life-next-state curr-life)
-        sum (score-life curr-life target state states-to-eval)))
+(defun evolve (population rounds operations)
+  "Evolve POPULATION for ROUNDS rounds using operations proportionally
+to the weights defined in OPERATIONS.
 
-(defun score-life (life target state states-to-eval)
-  (multiple-value-bind (matching non-matching) (compare-lives life target)
-    (if (< state (/ states-to-eval 10)) ; ugly magic number
-        ;; Initially punish for being like the target.
-        matching
-        ;; After a while, punish for being unlike the target, with more
-        ;; weighting towards the end state.
-        (* state non-matching))))
+=== Parameters ===
+POPULATION: speaks for itself.
+ROUNDS: number of rounds, default is 5.
+OPERATIONS: default is ((crossover 70) (mutation 20) (elitism 10)).
+
+=== Returns ===
+The evolved population."
+  (when (null rounds)
+    (setf rounds 5))
+  (when (null operations)
+    (setf operations '((crossover 70)
+                       (mutation 20)
+                       (elitism 10))))
+  (dotimes (i rounds population)
+    (evolve-solutions! population
+                       operations)))
+
+(defun evolve-solutions! (population operations)
+  "Creates new solutions based on genetic operations and overwrites the old ones
+in POPULATION."
+  (let ((n (size population))
+        (total-prop (loop for (op proportion) in operations
+                          sum proportion)))
+    (update-solutions!
+     population
+     (apply #'append
+            (loop for (op proportion) in operations
+                  for i from (1- (length operations)) downto 0
+                  collect (let ((m (if (= i 0)
+                                       ;; This prevents the population size being
+                                       ;; off by 1.
+                                       n
+                                       (floor (* n (/ proportion total-prop))))))
+                            (decf n m)
+                            (create-solutions op m population)))))))
+
+(defun create-solutions (op m population)
+  "Create M new solutions based on POPULATION using the operation OP."
+  (cond
+    ((eq op 'mutation)
+     (loop repeat m collect
+           (let ((genotype (mutate (genotype (select-solution population)))))
+             (make-instance 'solution
+                            :genotype genotype
+                            :fitness (eval-fitness genotype)))))
+    ((eq op 'crossover)
+     (loop repeat m collect
+           (let ((genotype
+                   (crossover (genotype (select-solution population))
+                              (genotype (select-solution population)))))
+             (make-instance 'solution
+                            :genotype genotype
+                            :fitness (eval-fitness genotype)))))
+    ((eq op 'elitism)
+     (subseq (sort (solutions population)
+                   #'>
+                   :key #'fitness)
+             0
+             m))
+    (t (error "Unknown genetic operator ~S" op))))
+
+(defun select-solution (population)
+  "Tournament selection."
+  (let ((s1 (random-solution population))
+        (s2 (random-solution population)))
+    (if (> (fitness s1) (fitness s2))
+        s1
+        s2)))
+
+(defun random-solution (population)
+  (nth (random (size population))
+       (solutions population)))

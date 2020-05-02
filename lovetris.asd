@@ -8,12 +8,15 @@
   :author "Kevin Galligan"
   :depends-on (:alexandria
                :trivial-gamekit
-               :bordeaux-threads)
+               :bordeaux-threads
+               :vgplot)
   :pathname "src"
   :serial t
   :components ((:file "package")
                (:file "queue")
                (:file "hatetris")
-               (:file "player-ai")
+               (:file "search")
                (:file "beam-search")
-               (:file "play")))
+               (:file "play")
+               (:file "genetic")
+               (:file "genetic-example")))
