@@ -13,6 +13,7 @@
   (:use :cl)
   (:export
    #:evolve-random
+   #:evolve
    
    ;; Used with population.
    #:best-solution
@@ -83,7 +84,8 @@
                       &key
                         (pop-size 100)
                         rounds
-                        operations)
+                        operations
+                        log)
   "Evolve solutions starting from a random population.
 
 === Parameters ===
@@ -92,6 +94,7 @@ POP-SIZE: how many solutions to keep in the population.
 ROUNDS: how many rounds of evolution to run, see #'evolve for default.
 OPERATIONS: proportion of new population to form using each operation type.
             See #'evolve for default.
+LOG: whether to log progress (t or nil).
 
 === Returns ===
 The evolved population."
@@ -104,10 +107,11 @@ The evolved population."
                                         :fitness (eval-fitness genotype)))
                        (loop for i below pop-size collect
                              (funcall random-genotype))))
-          rounds
-          operations))
+          :rounds rounds
+          :operations operations
+          :log log))
 
-(defun evolve (population rounds operations)
+(defun evolve (population &key rounds operations log)
   "Evolve POPULATION for ROUNDS rounds using operations proportionally
 to the weights defined in OPERATIONS.
 
@@ -115,6 +119,7 @@ to the weights defined in OPERATIONS.
 POPULATION: speaks for itself.
 ROUNDS: number of rounds, default is 5.
 OPERATIONS: default is ((crossover 70) (mutation 20) (elitism 10)).
+LOG: whether to log progress (t or nil).
 
 === Returns ===
 The evolved population."
@@ -125,6 +130,11 @@ The evolved population."
                        (mutation 20)
                        (elitism 10))))
   (dotimes (i rounds population)
+    (when log
+      (format t
+              "Round #~a, best solution fitness ~a~%"
+              i
+              (fitness (best-solution population))))
     (evolve-solutions! population
                        operations)))
 

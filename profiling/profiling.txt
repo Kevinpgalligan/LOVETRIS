@@ -166,3 +166,51 @@ Evaluation took:
 
 8
 "AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAA95DAAAAAAAA6AAAAA95DAAAAAAA9AAAAAA88A6AAAAAA22229AAAAAAAAAAAA2229AAAAA888FB2AEAAAAA8888AAAAAA95DAAAAAAA22AAAAAAA6AAAAA9AAAAA576AAAAAAAAAA2229AAAA888FB2AEAAAA8888AAAAA95DAAAAAA22AAAA576AAAAA80C8AAAAAAAA9AAAAA5AAAAAAAAA2228AAAAA220EAAAA83FAAAAA96AAA9AAA8883AAA8BBEEAAA56AAA8882AAA8AAAA7AAA567AAA8A2BEAAA023AA83FAAAA95AAA9AA803AAA8BA80C2A"
+
+#### Attempt the seventh
+Node cache. Holy shit, it's effective.
+
+This is plain greedy search. Measuring the size of the search tree. It's much smaller. I set "num-threads" to 1 in order to see the best case scenario, where no branches are expanded unnecessarily due to cache race conditions.
+
+LOVETRIS> (defparameter *s*
+            (make-instance 'beam-searcher
+                           :start-state (make-state)
+                           :num-threads 1
+                           :heuristic-eval (get-heuristic-eval -0.1 1.0 -0.4 -0.4)
+                           :search-depth 4
+                           :disable-beam t))
+*S*
+LOVETRIS> (expand-nodes! (list (search-tree *s*))
+                         4
+                         (heuristic-eval *s*)
+                         nil
+                         1
+                         (create-node-cache (search-tree *s*)))
+NIL
+LOVETRIS> (count-nodes (search-tree *s*))
+27756
+
+And wow, performance is also way better! Although, annoyingly, the end result is slightly worse. This is an unfortunate consequence of reducing duplication. We will end up not exploring some paths as deeply as we should. In exchange, should be able to extend the search depth. Which might make up for that a little.
+
+LOVETRIS> (time (run-searcher (lambda (state)
+                                 (make-instance 'beam-searcher
+                                                :disable-beam t
+                                                :search-depth 4
+                                                :heuristic-eval (get-heuristic-eval -0.1 1.0 -0.4 -0.4)
+                                                :start-state state
+                                                :num-threads 4))))
+Evaluation took:
+  106.349 seconds of real time
+  354.399005 seconds of total run time (349.180360 user, 5.218645 system)
+  [ Run times consist of 12.713 seconds GC time, and 341.687 seconds non-GC time. ]
+  333.24% CPU
+  31 lambdas converted
+  234,821,103,028 processor cycles
+  121,373,991,264 bytes consed
+  
+5
+"AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAAA083AAAAAAAA96AAAAAAA96AAAAAA576AAAAAAA88AAAAAAAA8EAAAAA822AAAAAAAA96AAAAAAA9A5AAAAAA9AAAAAAABAAAAA822A8AAAAAA82EAAAAAAA0BAAAAAA802EAAAAAAA2AAAAA5A8EAAAAA5AEAAAAA088BAAAAA822AAAAA95B6AAAAAA5AAAAA576AAAAAAAAAA22AAAA95AAAA9AAAA2AAA8222BAAA822AAAA56AA80C8AAAAAAA88AAA80AAA00EA00E
+
+Next steps!
+1) Optimise heuristics (of interest: how close will we get to -0.42786196, 0.48656175, -0.3844498, -0.6575638).
+2) Consider how far it can be pushed (memory + time constraints; how big can the search depth be without blowing up the heap, how long can it take so that it still runs within a night.

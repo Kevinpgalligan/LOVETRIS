@@ -2,7 +2,7 @@
 
 (in-package lovetris)
 
-(defun run-searcher (searcher-init &key max-states)
+(defun run-searcher (searcher-init &key max-states log)
   "Returns final score and hex-encoded sequence of moves."
   (let* ((i 0)
          (state (make-state))
@@ -12,6 +12,8 @@
                              (or (not max-states)
                                  (< i max-states)))
                   do (incf i)
+                  do (when log
+                       (format t "State #~a, score ~a~%" i (score state)))
                   do (setf state (advance searcher))
                   collect state)))
       (values (score (car (last states)))

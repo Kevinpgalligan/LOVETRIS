@@ -5,9 +5,9 @@ An AI to play this Tetris variant: https://qntm.org/files/hatetris/hatetris.html
 May need to do some special stuff to get the trivial-gamekit package working, see: https://github.com/borodust/trivial-gamekit
 
 ### TODO
-* Add a way to save / reload population, to enable the workflow: run for a few rounds, check how it's doing, run for a few rounds, etc.
-* Logging to see progress.
-* Implement node cache, should speed things up.
+* ~~Add a way to save / reload population, to enable the following workflow: run for a few rounds, check how it's doing, run for a few rounds, etc.~~
+* ~~Logging to see progress.~~
+* ~~Implement node cache, should speed things up. And potentially improve performance of beam search.~~
 * Kick off evolution of better parameters.
   (To consider: evolve them using beam search, or greedy search? Need to think it through).
 * FINAL RUN!!!!!! Exciting. Carefully consider beam width, search depth. And increase heap size.

@@ -73,7 +73,8 @@
                                     (disable-beam nil)
                                     (beam-width 2)
                                     (search-depth 4)
-                                    (num-threads 1))
+                                    (num-threads 1)
+                                    log)
   (genetic:evolve-random
    (lambda ()
      (make-instance 'search-genotype
@@ -87,7 +88,8 @@
                     :search-depth search-depth
                     :num-threads num-threads))
    :pop-size pop-size
-   :rounds rounds))
+   :rounds rounds
+   :log log))
 
 (defun plot-fitness (population)
   (vgplot:plot (apply #'append
