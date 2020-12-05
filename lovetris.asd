@@ -16,7 +16,7 @@
                (:file "queue")
                (:file "hatetris")
                (:file "search")
-               (:file "beam-search")
+               (:file "brute-search")
                (:file "play")
                (:file "genetic")
                (:file "train")))

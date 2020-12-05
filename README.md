@@ -5,14 +5,20 @@ An AI to play this Tetris variant: https://qntm.org/files/hatetris/hatetris.html
 May need to do some special stuff to get the trivial-gamekit package working, see: https://github.com/borodust/trivial-gamekit
 
 ### TODO
-* ~~Add a way to save / reload population, to enable the following workflow: run for a few rounds, check how it's doing, run for a few rounds, etc.~~
-* ~~Logging to see progress.~~
-* ~~Implement node cache, should speed things up. And potentially improve performance of beam search.~~
-* Kick off evolution of better parameters.
-  (To consider: evolve them using beam search, or greedy search? Need to think it through).
-* FINAL RUN!!!!!! Exciting. Carefully consider beam width, search depth. And increase heap size.
-* If that didn't break any records, use existing records as a runway.
-* (Maybe) Try MCTS.
+* Possibly: nodes can have multiple parents, backlink to them. This will be required for MCTS, anyway.
+* Evolve parameters for brute force search, see how good can get.
+* Nice utility: visualise AI playing.
+* Possible utility: search tree stats (state depths; distribution of heuristic scores; ...).
+* Springboard, use existing records as a runway.
+* MCTS (trade-off between reward & exploration).
 
-### Credits
-Jeffrey Massung for his queue implementation (https://github.com/massung/queue), which I copy/pasted here (with the addition of a new method).
+### Usage
+(Assuming you've done `(in-package lovetris)` in the REPL).
+
+Play the game (using controls).
+
+```lisp
+(play-game)
+```
+
+There are also a bunch of (possibly outdated) examples in profiling/profiling.txt.

@@ -7,12 +7,6 @@
   ((heuristic-params
     :initarg :heuristic-params
     :reader heuristic-params)
-   (disable-beam
-    :initarg :disable-beam
-    :reader disable-beam)
-   (beam-width
-    :initarg :beam-width
-    :reader beam-width)
    (search-depth
     :initarg :search-depth
     :reader search-depth)
@@ -23,9 +17,7 @@
 (defmethod genetic:eval-fitness ((geno search-genotype))
   (run-searcher
    (lambda (state)
-     (make-instance 'beam-searcher
-                    :disable-beam (disable-beam geno)
-                    :beam-width (beam-width geno)
+     (make-instance 'brute-searcher
                     :search-depth (search-depth geno)
                     :heuristic-eval (apply #'get-heuristic-eval
                                            (heuristic-params geno))
@@ -40,8 +32,6 @@
                                     (loop for x in (heuristic-params geno1)
                                           for y in (heuristic-params geno2)
                                           collect (/ (+ x y) 2)))
-                 :disable-beam (disable-beam geno1)
-                 :beam-width (beam-width geno1)
                  :search-depth (search-depth geno1)
                  :num-threads (num-threads geno1)))
 
@@ -54,8 +44,6 @@
                                                      ;; negative.
                                                      (- (random (* 2 +mutate-max+))
                                                         +mutate-max+))))
-                 :disable-beam (disable-beam geno)
-                 :beam-width (beam-width geno)
                  :search-depth (search-depth geno)
                  :num-threads (num-threads geno)))
 
@@ -70,8 +58,6 @@
           (/ x dist))))
 
 (defun evolve-searcher (rounds &key (pop-size 100)
-                                    (disable-beam nil)
-                                    (beam-width 2)
                                     (search-depth 4)
                                     (num-threads 1)
                                     log)
@@ -83,8 +69,6 @@
                                              (random 1.0)
                                              (- (random 1.0))
                                              (- (random 1.0))))
-                    :disable-beam disable-beam
-                    :beam-width beam-width
                     :search-depth search-depth
                     :num-threads num-threads))
    :pop-size pop-size

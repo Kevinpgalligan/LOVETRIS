@@ -420,3 +420,30 @@
 (defun get-pieces ()
   (mapcar #'copy-structure
           *pieces*))
+
+(defun states-equivalent-p (s1 s2)
+  (and (equalp (well s1) (well s2))
+       (equalp (score s1) (score s2))
+       (equalp (game-over s1) (game-over s2))))
+
+(defun state-hash (state)
+  (+ (* 2 (well-hash state))
+     (* 3 (score state))
+     (* 5 (if (game-over state) 1 0))))
+
+(defparameter *primes*
+  (list 2 3 5 7 11 13 17 19 23 29 31 37 41 43
+        47 53 59 61 67 71 73 79 83 89 97 101 103
+        107 109 113 127 131 137 139 149 151 157
+        163 167 173 179 181 191 193 197 199))
+
+(defun well-hash (state)
+  ;; Multiply rows by primes and sum them.
+  ;; THIS WON'T BE ABLE TO PROCESS ALL OF THE ROWS IF
+  ;; THERE ARE MORE ROWS THAN THE NUMBER OF PRIMES
+  ;; IN *primes*. I've tried to add enough primes for
+  ;; any occasion, but you never know.
+  (mod (loop for row across (well state)
+             for prime in *primes*
+             sum (* prime row))
+       (expt 10 20)))

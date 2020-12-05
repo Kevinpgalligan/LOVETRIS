@@ -123,10 +123,7 @@ to the garbage collector that it can collect."
 (defun num-holes (state)
   (loop for x from 0 below (well-width state) sum
         (loop for y from 1 below (well-height state) sum
-              ;; Should probably abstract the square types
-              ;; better. Have functions like is-empty-square-p
-              ;; and is-full-square-p.
-              ;; Also, this seems to be a weird definition of
+              ;; This seems to be a weird definition of
               ;; a "hole", should it perhaps be surrounded on
               ;; the sides as well?
               (if (and (empty-square-p state x y)

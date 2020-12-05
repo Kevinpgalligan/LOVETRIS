@@ -214,3 +214,63 @@ Evaluation took:
 Next steps!
 1) Optimise heuristics (of interest: how close will we get to -0.42786196, 0.48656175, -0.3844498, -0.6575638).
 2) Consider how far it can be pushed (memory + time constraints; how big can the search depth be without blowing up the heap, how long can it take so that it still runs within a night.
+
+
+#### Coming back to it (7 months later?)
+I ran the same code as before but got the full 8 points. Must be some weird multhreading-dependent thing that causes a branch of the tree to not be explored?
+
+Command:
+
+LOVETRIS> (time
+           (run-searcher (lambda (state)
+                            (make-instance 'beam-searcher
+                                           :disable-beam t
+                                           :search-depth 4
+                                           :heuristic-eval (get-heuristic-eval -0.1 1.0 -0.4 -0.4)
+                                           :start-state state
+                                           :num-threads 4))))
+
+Output:
+
+Evaluation took:
+  123.197 seconds of real time
+  392.558759 seconds of total run time (384.659237 user, 7.899522 system)
+  [ Run times consist of 19.812 seconds GC time, and 372.747 seconds non-GC time. ]
+  318.64% CPU
+  64 lambdas converted
+  393,492,401,888 processor cycles
+  147,431,608,784 bytes consed
+  
+8
+"AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAAA083AAAAAAAA96AAAAAAA96AAAAAA576AAAAAAA88AAAAAAAA8EAAAAA822AAAAAAAA96AAAAAAA9A5AAAAAA9AAAAAAABAAAAA822A8AAAAAA82EAAAAAAA0BAAAAAA83AAAAA00BAAAAAAA802EAAAAAA00BAAAAA80AAAAAA9AAAAAA95DAE2AAAAA8AAAAAA95AAAAAA8AAAAA5A2AAAAA65AAAAA97AAAAAAAAA220EAAA88AAAA802AAAA8AAA8AA96A76AAA808AAA99A2AA999AAAA0AAA8AA088AA96A9AA5A8EA96BAA0AA65BA95DAA9AA022A95A"
+
+
+
+Hmmmm. I'll have to refamiliarise myself with the code. Make sure that it's logically consistent. Think through possible causes of the score being lower.
+
+In other good news, the score improves once again if we increase the search depth by 1:
+
+LOVETRIS> (time 
+           (run-searcher (lambda (state)
+                            (make-instance 'beam-searcher
+                                           :disable-beam t
+                                           :search-depth 5
+                                           :heuristic-eval (get-heuristic-eval -0.1 1.0 -0.4 -0.4)
+                                           :start-state state
+                                           :num-threads 4))))
+
+Output:
+
+Evaluation took:
+  1725.859 seconds of real time
+  5032.426727 seconds of total run time (4934.721762 user, 97.704965 system)
+  [ Run times consist of 332.682 seconds GC time, and 4699.745 seconds non-GC time. ]
+  291.59% CPU
+  31 lambdas converted
+  5,512,400,115,808 processor cycles
+  1,813,653,405,712 bytes consed
+  
+9
+"AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAAA2AAAAAA82229AAAAAAA95A2AAAAAAA56AAAAAAA56AAAAAA9AAAAAAAAAAAA2229AAAAA888FB2AEAAAAA8888AAAAAAA22AAAAAAA6AAAAAA57AAAA95DAAAAAAAA0AAAAAA9AAAAA08FB2AEAAAAA088AAAAAA82AAAAAA6AAAAA6AAAA9AAAA95EAAAAA02B22AAAAA95DAAAAAA08A8AAAAA088EAAAA83AAAA957AAAAA6AAA082AAAA95AAAA22AAA6AAAAAA56AA8888AAA22AAA6A95AA088AAA0AAA6A088AA95AA0AA9A088AA00E"
+
+At that rate of complexity increase, by the way, we can expect it to take 6+ hours to finish a game with a search depth of 6. Also, just to note that we haven't yet optimised the heuristics.
