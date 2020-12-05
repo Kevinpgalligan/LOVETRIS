@@ -41,33 +41,44 @@
                  states)))
 
 (defparameter *hex-mapping*
-  '(("LL" "0")
-    ("LR" "1")
-    ("LD" "2")
-    ("LU" "3")
-    ("RL" "4")
-    ("RR" "5")
-    ("RD" "6")
-    ("RU" "7")
-    ("DL" "8")
-    ("DR" "9")
-    ("DD" "A")
-    ("DU" "B")
-    ("UL" "C")
-    ("UR" "D")
-    ("UD" "E")
-    ("UU" "F")))
+  '(("LL" . "0")
+    ("LR" . "1")
+    ("LD" . "2")
+    ("LU" . "3")
+    ("RL" . "4")
+    ("RR" . "5")
+    ("RD" . "6")
+    ("RU" . "7")
+    ("DL" . "8")
+    ("DR" . "9")
+    ("DD" . "A")
+    ("DU" . "B")
+    ("UL" . "C")
+    ("UR" . "D")
+    ("UD" . "E")
+    ("UU" . "F")))
 
 (defun move-pair-to-hex (move-pair)
-  (cadr (assoc move-pair *hex-mapping* :test #'equalp)))
+  (cdr (assoc move-pair *hex-mapping* :test #'equalp)))
+
+(defun decode-game (encoding)
+  (apply #'concatenate
+         (cons 'string
+               (loop for c across encoding
+                     collect (car (rassoc (string c) *hex-mapping* :test #'equalp))))))
 
 (defclass node ()
-  ((state
+  ((parents
+    :initarg :parents
+    :initform nil
+    :accessor parents)
+   (state
     :initarg :state
     :initform (error "Must provide state for node.")
     :reader state)
    (heuristic-value
     :initarg :heuristic-value
+    :initform nil
     :accessor heuristic-value)
    (children
     :initarg :children
@@ -83,20 +94,42 @@
   ;; If we add children to a node, also mark it as expanded.
   (setf (expanded node) t))
 
-(defun make-node (state &key heuristic-value)
-  (make-instance 'node
-                 :state state
-                 :heuristic-value heuristic-value))
-
 (defun count-nodes (node)
   "Count nodes in the tree rooted at the given node."
   (+ 1 (apply #'+ (mapcar #'count-nodes (children node)))))
 
-(defun destroy-tree (node)
+(defun destroy-tree (node keep-cache)
   "Attempts to break references between nodes in the given tree, as a hint
 to the garbage collector that it can collect."
-  (mapcar #'destroy-tree (children node))
-  (setf (children node) nil))
+  (when (not (get-node keep-cache node))
+    (loop for child in (children node)
+          do (destroy-tree child keep-cache))
+    (setf (children node) nil)))
+
+(defclass node-cache ()
+  ((hashset
+    :initform (make-hash-table :hash-function #'node-hash
+                               :test #'nodes-equivalent-p
+                               ;; Will be accessed by multiple threads, so...
+                               :synchronized t)
+    :reader hashset)))
+
+(defun nodes-equivalent-p (n1 n2)
+  (states-equivalent-p (state n1) (state n2)))
+
+(defgeneric add (cache node)
+  (:documentation "Add node to cache."))
+(defmethod add ((cache node-cache) node)
+  (setf (gethash node (hashset cache)) node))
+
+(defgeneric get-node (cache node)
+  (:documentation "Get this node from the cache, if it (or an equivalent
+node object) exists already."))
+(defmethod get-node ((cache node-cache) node)
+  (gethash node (hashset cache)))
+
+(defun node-hash (node)
+  (state-hash (state node)))
 
 (defgeneric advance (tree-searcher)
   (:documentation "Get tree searcher to advance and return the next state."))

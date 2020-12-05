@@ -23,7 +23,7 @@
                                        &key start-state)
   (when (not start-state)
     (error "No state to start from."))
-  (setf (search-tree searcher) (make-node start-state)))
+  (setf (search-tree searcher) (make-instance 'node :state start-state)))
 
 (defmethod advance ((searcher brute-searcher))
   (expand-nodes! (list (search-tree searcher))
@@ -31,20 +31,21 @@
                  (heuristic-eval searcher)
                  (num-threads searcher)
                  (create-node-cache (search-tree searcher)))
-  (propagate-heuristic-values! (search-tree searcher))
+  (propagate-heuristic-values! (search-tree searcher) (heuristic-eval searcher))
   (let ((next-node
           (alexandria:extremum (children (search-tree searcher))
                                #'>
                                :key #'heuristic-value)))
-    (loop for node in (children (search-tree searcher)) do
-          ;; This should help SBCL to perform garbage collection
-          ;; properly. In large data structures, such as trees, SBCL's
-          ;; garbage collector can leave entire branches of the tree
-          ;; uncollected after we've discarded them, due to its conservatism.
-          ;; Eventually, this will cause heap exhaustion. A rather nasty
-          ;; trait of the implementation.
-          (when (not (eq node next-node))
-            (destroy-tree node)))
+    (let ((keep-cache (create-node-cache next-node)))
+      (loop for node in (children (search-tree searcher)) do
+            ;; This should help SBCL to perform garbage collection
+            ;; properly. In large data structures, such as trees, SBCL's
+            ;; garbage collector can leave entire branches of the tree
+            ;; uncollected after we've discarded them, due to its conservatism.
+            ;; Eventually, this will cause heap exhaustion. A rather nasty
+            ;; trait of the implementation.
+            (when (not (eq node next-node))
+              (destroy-tree node keep-cache))))
     (setf (search-tree searcher) next-node)
     (state next-node)))
 
@@ -103,24 +104,22 @@
             (bt:join-thread thread)))))
 
 (defun generate-children! (node heuristic-eval node-cache)
-  (let ((child-nodes
-          (remove-if (lambda (node)
-                       (contains node-cache node))
-                     (mapcar (lambda (state)
-                               (make-node
-                                state
-                                :heuristic-value (funcall heuristic-eval state)))
-                             (possible-next-states (state node))))))
-    (setf (children node) child-nodes)
-    ;; There is a race condition here. Threads A & B both
-    ;; check the cache for node N, it's not there. Then they
-    ;; both add it to their respective branches of the tree, and
-    ;; to the node cache. But we're accepting that risk in exchange
-    ;; for simplicity of implementation. It's not the end of the world
-    ;; if we explore a branch of the search tree needlessly due to
-    ;; a failure of the cache.
-    (loop for child in (children node) do
-          (add node-cache child))))
+  (setf (children node)
+        (loop for state in (possible-next-states (state node))
+              for child = (make-instance 'node :state state :parents (list node))
+              for existing = (get-node node-cache child)
+              do (if existing
+                     ;; TODO make this thread-safe.
+                     ;; There is a race condition here. Threads A & B both
+                     ;; check the cache for node N, it's not there. Then they
+                     ;; both add it to their respective branches of the tree, and
+                     ;; to the node cache. But we're accepting that risk in exchange
+                     ;; for simplicity of implementation. It's not the end of the world
+                     ;; if we explore a branch of the search tree needlessly due to
+                     ;; a failure of the cache.
+                     (setf (parents existing) (cons node (parents existing)))
+                     (add node-cache child))
+              collect (or existing child))))
 
 (defun add-leaves! (node remaining-depth heuristic-eval node-cache)
   (when (< 0 remaining-depth)
@@ -129,34 +128,22 @@
     (loop for child in (children node) do
           (add-leaves! child (1- remaining-depth) heuristic-eval node-cache))))
 
-(defun propagate-heuristic-values! (node)
+(defun propagate-heuristic-values! (node heuristic-eval)
+  ;; Due to nodes having multiple parents, this
+  ;; can result in us traversing the same branch
+  ;; multiple times. If it's really inefficient
+  ;; and crappy, there are ways of avoiding it.
+  ;; E.g. clear heuristic values from tree when
+  ;; we're finished & check if a node already has
+  ;; a value before descending.
   (if (not (children node))
-      (heuristic-value node)
+      (progn
+        (when (not (heuristic-value node))
+          (setf (heuristic-value node) (funcall heuristic-eval (state node))))
+        (heuristic-value node))
       (setf (heuristic-value node)
             (apply #'max
-                   (mapcar #'propagate-heuristic-values!
+                   (mapcar (lambda (node)
+                             (propagate-heuristic-values! node heuristic-eval))
                            (children node))))))
 
-(defclass node-cache ()
-  ((hashset
-    :initform (make-hash-table :hash-function #'node-hash
-                               :test #'nodes-equivalent-p
-                               ;; Will be accessed by multiple threads, so...
-                               :synchronized t)
-    :reader hashset)))
-
-(defun nodes-equivalent-p (n1 n2)
-  (states-equivalent-p (state n1) (state n2)))
-
-(defgeneric add (cache node)
-  (:documentation "Add node to cache."))
-(defmethod add ((cache node-cache) node)
-  (setf (gethash node (hashset cache)) t))
-
-(defgeneric contains (cache node)
-  (:documentation "Whether cache contains the given node."))
-(defmethod contains ((cache node-cache) node)
-  (gethash node (hashset cache)))
-
-(defun node-hash (node)
-  (state-hash (state node)))

@@ -119,7 +119,22 @@
                      +square-size+
                      :fill-paint colour))
 
-(defun play-game ()
+(defun play-hatetris ()
   (setf *state* (make-state))
   (setf *piece* (get-worst-piece *state*))
   (gamekit:start 'hatetris))
+
+(defun show-hatetris-replay (encoded-game &key (move-delay-seconds 0.2))
+  (play-game)
+  (let ((decoded (decode-game encoded-game)))
+    (loop for move across decoded
+          do (sleep move-delay-seconds)
+          do (update-piece (move-to-fn move)))))
+
+(defun move-to-fn (move)
+  (cond
+    ((char-equal move #\D) #'piece-down)
+    ((char-equal move #\L) #'piece-left)
+    ((char-equal move #\R) #'piece-right)
+    ((char-equal move #\U) #'piece-rotate)
+    (t (error (format nil "Invalid move ~C" move)))))

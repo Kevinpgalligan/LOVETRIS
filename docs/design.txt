@@ -1,0 +1,36 @@
+### Brute force improvement (Dec 5th 2020)
+Success! Prevented needless pruning of the search tree, which
+resulted in a slightly improved score. By needless, I mean we
+search nodes A -> B, then we omit the edge C -> B because
+B has been explored already. But if C ends up getting picked
+as the next node, we've lost B forever. When we should really
+check it out. The next step is to make the code thread-safe again
+so that we can make use of those sweet sweet 4 cores.
+
+Buuuut the replay isn't working in the browser version of HATETRIS.
+I hope I haven't introduced a bug.
+
+LOVETRIS> (time
+           (run-searcher (lambda (state)
+                           (make-instance 'brute-searcher
+                                          :heuristic-eval (get-heuristic-eval -0.1 1.0 -0.4 -0.4)
+                                          :start-state state
+                                          :num-threads 1
+                                          :search-depth 4))
+                         :log t))
+
+Output:
+
+Evaluation took:
+  545.055 seconds of real time
+  451.898379 seconds of total run time (446.440749 user, 5.457630 system)
+  [ Run times consist of 27.341 seconds GC time, and 424.558 seconds non-GC time. ]
+  82.91% CPU
+  55 forms interpreted
+  60 lambdas converted
+  1,740,923,676,960 processor cycles
+  6 page faults
+  218,374,936,304 bytes consed
+
+10
+"AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAAA083AAAAAAA95DAAAAAAA576AAAAAAA5DAAAAAAA88AAAAAAAAA6AAAAAAA08AAAAAAAAAAAAAAAA80C8AAAAAAAA032AAAAAAA95EAAAAAA576AAAAAA95DAAAAAAA576AAAAAA95DAAAAAAA8EAAAAAA2EAAAAA808AAAAAA208AAAAA8222AAAAAA08AAAAA80FB2AAAAAA6AAAA95DAEAAAAA22AAA999DAEAAAA59AAAA822AAAAAAAAA99AAAA69AAAA6AAA02EAAAA56DAAAA088AAAA576AA95B6AAA03ECABAAA022AAA022AA8822AAA20AA96AA03ECAAA9AA8AA8A02EFAE80EAA65AA65A59A96A"
