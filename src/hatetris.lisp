@@ -233,7 +233,10 @@
         ;; sequence that was necessary to get it there.
         (mapcar (lambda (position)
                   (apply (lambda (piece move-sequence)
-                           (merge-piece state piece move-sequence))
+                           ;; Reverse the move sequence so that the moves
+                           ;; are ordered from first to last (instead of last
+                           ;; to first).
+                           (merge-piece state piece (reverse move-sequence)))
                          position))
                 ;; Some of the positions are duplicates, it's just
                 ;; that the bounding box is in a different position

@@ -2,12 +2,13 @@
 An AI to play this Tetris variant: https://qntm.org/files/hatetris/hatetris.html
 
 ### Setup
-May need to do some special stuff to get the trivial-gamekit package working, see: https://github.com/borodust/trivial-gamekit
+trivial-gamekit package has manual installation steps, see: https://github.com/borodust/trivial-gamekit
 
 ### TODO
-* Figure out why replay isn't working.
+* Write own queue implementation.
+* Fix bug in replay.
 * Make code thread-safe again.
-* Nice-to-haves: visualise AI playing, as it is playing; search tree stats (state depths; distribution of heuristic scores; ...).
+* Nice-to-haves: search tree stats (state depths; distribution of heuristic scores; ...).
 * Evolve parameters for brute force search, see how good it can get.
 * Springboard, use existing records as a runway.
 * MCTS (trade-off between reward & exploration).
@@ -18,7 +19,7 @@ May need to do some special stuff to get the trivial-gamekit package working, se
 Play the game (using controls).
 
 ```lisp
-(play-game)
+(play-hatetris)
 ```
 
-There are also a bunch of (possibly outdated) examples in profiling/profiling.txt.
+I'll add more examples here. In the meantime, there are slightly outdated examples in docs/profiling.txt.

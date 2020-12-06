@@ -125,7 +125,7 @@
   (gamekit:start 'hatetris))
 
 (defun show-hatetris-replay (encoded-game &key (move-delay-seconds 0.2))
-  (play-game)
+  (play-hatetris)
   (let ((decoded (decode-game encoded-game)))
     (loop for move across decoded
           do (sleep move-delay-seconds)
@@ -138,3 +138,12 @@
     ((char-equal move #\R) #'piece-right)
     ((char-equal move #\U) #'piece-rotate)
     (t (error (format nil "Invalid move ~C" move)))))
+
+(defun run-hatetris-with-ai (searcher-init &key (move-delay-seconds 0.1))
+  (play-hatetris)
+  (run-searcher searcher-init
+                :initial-state *state*
+                :process-fn (lambda (state)
+                              (loop for move in (last-move-sequence state)
+                                    do (sleep move-delay-seconds)
+                                    do (update-piece (move-to-fn (char move 0)))))))

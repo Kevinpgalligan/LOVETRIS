@@ -2,10 +2,14 @@
 
 (in-package lovetris)
 
-(defun run-searcher (searcher-init &key max-states log)
-  "Returns final score and hex-encoded sequence of moves."
+(defun run-searcher (searcher-init &key max-states log initial-state process-fn)
+  "Returns final score and hex-encoded sequence of moves.
+SEARCHER-INIT is a function that accepts the initial hatetris
+state and returns a searcher (which implements the ADVANCE
+generic function).
+PROCESS-FN is called on each new state."
   (let* ((i 0)
-         (state (make-state))
+         (state (or initial-state (make-state)))
          (searcher (funcall searcher-init state)))
     (let ((states
             (loop while (and (not (game-over state))
@@ -15,6 +19,8 @@
                   do (when log
                        (format t "State #~a, score ~a~%" i (score state)))
                   do (setf state (advance searcher))
+                  do (when process-fn
+                       (funcall process-fn state))
                   collect state)))
       (values (score (car (last states)))
               (encode-game states)))))
@@ -34,11 +40,7 @@
                          :collect (concatenate 'string a b))))))
 
 (defun extract-moves (states)
-  (apply #'append
-         (mapcar (lambda (state)
-                   ;; Gotta reverse, moves are stored most recent first.
-                   (reverse (last-move-sequence state)))
-                 states)))
+  (apply #'append (mapcar #'last-move-sequence states)))
 
 (defparameter *hex-mapping*
   '(("LL" . "0")

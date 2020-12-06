@@ -28,7 +28,6 @@
 (defmethod advance ((searcher brute-searcher))
   (expand-nodes! (list (search-tree searcher))
                  (search-depth searcher)
-                 (heuristic-eval searcher)
                  (num-threads searcher)
                  (create-node-cache (search-tree searcher)))
   (propagate-heuristic-values! (search-tree searcher) (heuristic-eval searcher))
@@ -59,7 +58,7 @@
   (loop for child in (children node) do
         (populate-cache cache child)))
 
-(defun expand-nodes! (nodes remaining-depth heuristic-eval num-threads node-cache)
+(defun expand-nodes! (nodes remaining-depth num-threads node-cache)
   (when (> remaining-depth 0)
     ;; Divide nodes as evenly as possible among threads for expansion, we
     ;; continue the single-threaded expansion of any remaining nodes.
@@ -67,24 +66,19 @@
            (nodes-for-threads (subseq nodes 0 split-index))
            (leftover-nodes (subseq nodes split-index)))
       (when nodes-for-threads
-        (expand-with-threads nodes-for-threads
-                             remaining-depth
-                             heuristic-eval
-                             num-threads
-                             node-cache))
+        (expand-with-threads nodes-for-threads remaining-depth num-threads node-cache))
       (when leftover-nodes
         (loop for node in leftover-nodes do
               (when (not (expanded node))
-                (generate-children! node heuristic-eval node-cache)))
+                (generate-children! node node-cache)))
         (expand-nodes! (apply #'append
                               (mapcar #'children
                                       leftover-nodes))
                        (1- remaining-depth)
-                       heuristic-eval
                        num-threads
                        node-cache)))))
 
-(defun expand-with-threads (nodes remaining-depth heuristic-eval num-threads node-cache)
+(defun expand-with-threads (nodes remaining-depth num-threads node-cache)
   (let ((nodes-lock (bt:make-lock)))
     (let ((threads
             (loop for i below num-threads collect
@@ -95,15 +89,12 @@
                                      (pop nodes))))
                              (if (null node)
                                  (return)
-                                 (add-leaves! node
-                                              remaining-depth
-                                              heuristic-eval
-                                              node-cache)))))))))
+                                 (add-leaves! node remaining-depth node-cache)))))))))
       ;; Now wait for the threads to terminate.
       (loop for thread in threads do
             (bt:join-thread thread)))))
 
-(defun generate-children! (node heuristic-eval node-cache)
+(defun generate-children! (node node-cache)
   (setf (children node)
         (loop for state in (possible-next-states (state node))
               for child = (make-instance 'node :state state :parents (list node))
@@ -121,12 +112,12 @@
                      (add node-cache child))
               collect (or existing child))))
 
-(defun add-leaves! (node remaining-depth heuristic-eval node-cache)
+(defun add-leaves! (node remaining-depth node-cache)
   (when (< 0 remaining-depth)
     (when (not (expanded node))
-      (generate-children! node heuristic-eval node-cache))
+      (generate-children! node node-cache))
     (loop for child in (children node) do
-          (add-leaves! child (1- remaining-depth) heuristic-eval node-cache))))
+          (add-leaves! child (1- remaining-depth) node-cache))))
 
 (defun propagate-heuristic-values! (node heuristic-eval)
   ;; Due to nodes having multiple parents, this
