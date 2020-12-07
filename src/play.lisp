@@ -55,44 +55,16 @@
                        :fill-paint *red*)))
 
 (defmethod gamekit:post-initialize ((app hatetris))
-  ;; Yes, I'm aware that this is some horrible duplication, but
-  ;; it wouldn't work when I put the button / function pairs
-  ;; in a list and looped through them. For some reason, all of
-  ;; the buttons were bound to the last function in the list.
-  ;; Maybe the lambda in the loop was being overwritten? Anyway,
-  ;; I'm too frustrated to spend any more time on it.
-  (gamekit:bind-button :up
-                       :pressed
-                       (lambda ()
-                         (update-piece #'piece-rotate)))
-  (gamekit:bind-button :up
-                       :repeating
-                       (lambda ()
-                         (update-piece #'piece-rotate)))
-  (gamekit:bind-button :down
-                       :pressed
-                       (lambda ()
-                         (update-piece #'piece-down)))
-  (gamekit:bind-button :down
-                       :repeating
-                       (lambda ()
-                         (update-piece #'piece-down)))
-  (gamekit:bind-button :left
-                       :pressed
-                       (lambda ()
-                         (update-piece #'piece-left)))
-  (gamekit:bind-button :left
-                       :repeating
-                       (lambda ()
-                         (update-piece #'piece-left)))
-  (gamekit:bind-button :right
-                       :pressed
-                       (lambda ()
-                         (update-piece #'piece-right)))
-  (gamekit:bind-button :right
-                       :repeating
-                       (lambda ()
-                         (update-piece #'piece-right))))
+  (loop for (key . move-fn) in `((:up . ,#'piece-rotate)
+                                 (:down . ,#'piece-down)
+                                 (:left . ,#'piece-left)
+                                 (:right . ,#'piece-right))
+        do (gamekit:bind-button key :pressed (make-update-fn move-fn))
+        do (gamekit:bind-button key :repeating (make-update-fn move-fn))))
+
+(defun make-update-fn (move-fn)
+  (lambda ()
+    (update-piece move-fn)))
 
 (defun update-piece (piece-move)
   (when *piece*
@@ -124,7 +96,7 @@
   (setf *piece* (get-worst-piece *state*))
   (gamekit:start 'hatetris))
 
-(defun show-hatetris-replay (encoded-game &key (move-delay-seconds 0.2))
+(defun show-hatetris-replay (encoded-game &key (move-delay-seconds 0.1))
   (play-hatetris)
   (let ((decoded (decode-game encoded-game)))
     (loop for move across decoded
@@ -143,7 +115,8 @@
   (play-hatetris)
   (run-searcher searcher-init
                 :initial-state *state*
-                :process-fn (lambda (state)
-                              (loop for move in (last-move-sequence state)
+                :process-fn (lambda (state move-sequence)
+                              (declare (ignore state))
+                              (loop for move in move-sequence
                                     do (sleep move-delay-seconds)
-                                    do (update-piece (move-to-fn (char move 0)))))))
+                                    do (update-piece (move-to-fn move))))))

@@ -24,24 +24,16 @@
     :reader bar)
    (game-over
     :initarg :game-over
-    :accessor game-over)
-   (last-move-sequence
-    :initarg :last-move-sequence
-    :initform nil
-    :accessor last-move-sequence)))
+    :accessor game-over)))
 
-(defmethod print-object ((obj state) out)
-  (print-unreadable-object (obj out :type t)
-    (format out
-            "game-over=~a, score=~a~%~{~a~%~}"
-            (game-over obj)
-            (score obj)
-            (loop for row in (coerce (well obj) 'list)
-                  collect (reverse
-                           ;; Oops, hard-coding the width.
-                           ;; This is only used for debugging, anyway, so
-                           ;; not overly important.
-                           (format nil "~10,'0B" (ldb (byte 10 0) row)))))))
+(defun display-state (state)
+  (format t "game-over=~a, score=~a~%~{~a~%~}" (game-over state) (score state)
+          (loop for row in (coerce (well state) 'list)
+                collect (reverse
+                         ;; Oops, hard-coding the width.
+                         ;; This is only used for debugging, anyway, so
+                         ;; not overly important.
+                         (format nil "~10,'0B" (ldb (byte 10 0) row))))))
 
 (defun make-state ()
   (make-instance 'state
@@ -50,8 +42,7 @@
                                    :initial-element 0)
                  :score 0
                  :bar +bar+
-                 :game-over nil
-                 :last-move-sequence nil))
+                 :game-over nil))
 
 (defun full-square-p (state x y)
   (< 0 (logand (ash 1 x) (aref (well state) y))))
@@ -165,12 +156,12 @@
 
 (defparameter *piece-moves*
   (list
-   (list #'piece-down "D")
-   (list #'piece-left "L")
-   (list #'piece-right "R")
-   (list #'piece-rotate "U")))
+   (list #'piece-down #\D)
+   (list #'piece-left #\L)
+   (list #'piece-right #\R)
+   (list #'piece-rotate #\U)))
 
-(defun merge-piece (state piece &optional move-sequence)
+(defun merge-piece (state piece)
   ;; Override the name of 'state' to avoid confusion, don't
   ;; want the copy & the original in the same namespace.
   (let ((state (deep-copy-state state)))
@@ -181,10 +172,9 @@
     (if (tower-above-bar state)
         (setf (slot-value state 'game-over) t)
         (clear-full-rows! state))
-    (setf (slot-value state 'last-move-sequence) move-sequence)
     state))
 
-(defun possible-next-states (state)
+(defun possible-placements (state)
   (if (game-over state)
       (list)
       (multiple-value-bind (piece placements)
@@ -192,15 +182,21 @@
         (declare (ignore piece))
         placements)))
 
+(defclass placement ()
+  ((state
+    :initarg :state
+    :reader state)
+   (move-sequence
+    :initarg :move-sequence
+    :reader move-sequence)))
+
 (defun get-placements (state piece)
   ;; Move piece down to the area of interest so that we
   ;; don't waste time.
   (let ((initial-move-sequence (list)))
     (loop while (bbox-above-tower state piece) do
           (setf piece (piece-down piece))
-          (push "D" initial-move-sequence))
-    ;; Keep track of piece positions / orientations we've
-    ;; seen before.
+          (push #\D initial-move-sequence))
     (let ((seen (make-hash-table :test #'equal)))
       ;; Now do a breadth first search to find valid piece positions
       ;; using the left, right, down & rotate movements. Have to keep
@@ -217,8 +213,9 @@
                      (move-sequence (cadr position)))
                 (when (lockable-p state piece)
                   ;; One extra move is required to lock it in place.
-                  (push (list piece (cons "D" move-sequence))
-                        locked-positions))
+                  ;; Also, reverse the moves, since they were added
+                  ;; most recent first.
+                  (push (list piece (reverse (cons #\D move-sequence))) locked-positions))
                 (loop for (move move-id) in *piece-moves* do
                       (let ((next-piece (funcall move piece)))
                         (when (and (not (seen-p seen next-piece))
@@ -233,10 +230,9 @@
         ;; sequence that was necessary to get it there.
         (mapcar (lambda (position)
                   (apply (lambda (piece move-sequence)
-                           ;; Reverse the move sequence so that the moves
-                           ;; are ordered from first to last (instead of last
-                           ;; to first).
-                           (merge-piece state piece (reverse move-sequence)))
+                           (make-instance 'placement
+                                          :state (merge-piece state piece)
+                                          :move-sequence move-sequence))
                          position))
                 ;; Some of the positions are duplicates, it's just
                 ;; that the bounding box is in a different position
@@ -340,7 +336,10 @@
   (alexandria:extremum (reverse xs) #'> :key key))
 
 (defun min-height (placements)
-  (apply #'min (mapcar #'tower-height placements)))
+  (apply #'min
+         (mapcar (lambda (placement)
+                   (tower-height (state placement)))
+                 placements)))
 
 (defun generate-piece (template)
   ;; Generate all of the piece's possible orientations, add
@@ -421,8 +420,7 @@
       "...."))))
 
 (defun get-pieces ()
-  (mapcar #'copy-structure
-          *pieces*))
+  (mapcar #'copy-structure *pieces*))
 
 (defun states-equivalent-p (s1 s2)
   (and (equalp (well s1) (well s2))
@@ -450,3 +448,49 @@
              for prime in *primes*
              sum (* prime row))
        (expt 10 20)))
+
+(defun encode-game (moves)
+  "Takes a list of moves (characters U, L, R, D) and hex encodes them
+in a format that is understood by the web version of HATETRIS (and can
+be used to run replays in the browser)."
+  (apply #'concatenate
+         'string
+         (mapcar #'move-pair-to-hex
+                 (loop :for (a b)
+                       :on (if (= 0 (mod (length moves) 2))
+                               moves
+                               ;; If there's an odd number of moves, end
+                               ;; it with an extra 'down' move. It can't
+                               ;; affect the outcome of the replay.
+                               (append moves (list #\D)))
+                       :by #'cddr
+                       :while b
+                       :collect (coerce (list a b) 'string)))))
+
+(defparameter *hex-mapping*
+  '(("LL" . "0")
+    ("LR" . "1")
+    ("LD" . "2")
+    ("LU" . "3")
+    ("RL" . "4")
+    ("RR" . "5")
+    ("RD" . "6")
+    ("RU" . "7")
+    ("DL" . "8")
+    ("DR" . "9")
+    ("DD" . "A")
+    ("DU" . "B")
+    ("UL" . "C")
+    ("UR" . "D")
+    ("UD" . "E")
+    ("UU" . "F")))
+
+(defun move-pair-to-hex (move-pair)
+  (cdr (assoc move-pair *hex-mapping* :test #'equalp)))
+
+(defun decode-game (encoding)
+  (apply #'append
+         (mapcar (lambda (move-pair)
+                   (coerce move-pair 'list))
+                 (loop for c across encoding
+                       collect (car (rassoc (string c) *hex-mapping* :test #'equalp))))))

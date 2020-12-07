@@ -3,7 +3,7 @@
 (defclass brute-searcher ()
   ((search-depth
     :initarg :search-depth
-    :initform 6
+    :initform 4
     :reader search-depth
     :documentation "How deep to search in the tree before picking a move.")
    (heuristic-eval
@@ -31,10 +31,12 @@
                  (num-threads searcher)
                  (create-node-cache (search-tree searcher)))
   (propagate-heuristic-values! (search-tree searcher) (heuristic-eval searcher))
-  (let ((next-node
-          (alexandria:extremum (children (search-tree searcher))
-                               #'>
-                               :key #'heuristic-value)))
+  (let* ((next-edge
+           (alexandria:extremum (edges (search-tree searcher))
+                                #'>
+                                :key (lambda (edge)
+                                       (heuristic-value (edge-child edge)))))
+         (next-node (edge-child next-edge)))
     (let ((keep-cache (create-node-cache next-node)))
       (loop for node in (children (search-tree searcher)) do
             ;; This should help SBCL to perform garbage collection
@@ -46,7 +48,7 @@
             (when (not (eq node next-node))
               (destroy-tree node keep-cache))))
     (setf (search-tree searcher) next-node)
-    (state next-node)))
+    (values (state next-node) (edge-move-sequence next-edge))))
 
 (defun create-node-cache (node)
   (let ((cache (make-instance 'node-cache)))
@@ -95,9 +97,11 @@
             (bt:join-thread thread)))))
 
 (defun generate-children! (node node-cache)
-  (setf (children node)
-        (loop for state in (possible-next-states (state node))
-              for child = (make-instance 'node :state state :parents (list node))
+  (setf (edges node)
+        (loop for placement in (possible-placements (state node))
+              for child = (make-instance 'node
+                                         :state (state placement)
+                                         :parents (list node))
               for existing = (get-node node-cache child)
               do (if existing
                      ;; TODO make this thread-safe.
@@ -110,7 +114,8 @@
                      ;; a failure of the cache.
                      (setf (parents existing) (cons node (parents existing)))
                      (add node-cache child))
-              collect (or existing child))))
+              collect (make-edge (move-sequence placement)
+                                 (or existing child)))))
 
 (defun add-leaves! (node remaining-depth node-cache)
   (when (< 0 remaining-depth)

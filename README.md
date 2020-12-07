@@ -6,9 +6,8 @@ trivial-gamekit package has manual installation steps, see: https://github.com/b
 
 ### TODO
 * Write own queue implementation.
-* Fix bug in replay.
 * Make code thread-safe again.
-* Nice-to-haves: search tree stats (state depths; distribution of heuristic scores; ...).
+* Search tree stats: node depths, distribution of heuristic scores, average ply, number of nodes / space occupied. This can be used to inform what sorta search depth will be feasible.
 * Evolve parameters for brute force search, see how good it can get.
 * Springboard, use existing records as a runway.
 * MCTS (trade-off between reward & exploration).

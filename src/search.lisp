@@ -2,72 +2,28 @@
 
 (in-package lovetris)
 
-(defun run-searcher (searcher-init &key max-states log initial-state process-fn)
-  "Returns final score and hex-encoded sequence of moves.
+(defun run-searcher (searcher-init &key max-states initial-state process-fn)
+  "Returns final score, a hex-encoded sequence of moves, and the final state.
 SEARCHER-INIT is a function that accepts the initial hatetris
 state and returns a searcher (which implements the ADVANCE
 generic function).
-PROCESS-FN is called on each new state."
-  (let* ((i 0)
-         (state (or initial-state (make-state)))
+PROCESS-FN is called on each new state and move sequence."
+  (let* ((state (or initial-state (make-state)))
          (searcher (funcall searcher-init state)))
-    (let ((states
-            (loop while (and (not (game-over state))
+    (let ((move-sequences
+            (loop for i = 0 then (1+ i)
+                  while (and (not (game-over state))
                              (or (not max-states)
                                  (< i max-states)))
-                  do (incf i)
-                  do (when log
-                       (format t "State #~a, score ~a~%" i (score state)))
-                  do (setf state (advance searcher))
-                  do (when process-fn
-                       (funcall process-fn state))
-                  collect state)))
-      (values (score (car (last states)))
-              (encode-game states)))))
-
-(defun encode-game (states)
-  (let* ((moves (extract-moves states))
-         (n-moves (length moves)))
-    (apply #'concatenate
-           'string
-           (mapcar #'move-pair-to-hex
-                   (loop :for (a b)
-                         :on (if (= 0 (mod n-moves 2))
-                                 moves
-                                 (append moves (list "D")))
-                         :by #'cddr
-                         :while b
-                         :collect (concatenate 'string a b))))))
-
-(defun extract-moves (states)
-  (apply #'append (mapcar #'last-move-sequence states)))
-
-(defparameter *hex-mapping*
-  '(("LL" . "0")
-    ("LR" . "1")
-    ("LD" . "2")
-    ("LU" . "3")
-    ("RL" . "4")
-    ("RR" . "5")
-    ("RD" . "6")
-    ("RU" . "7")
-    ("DL" . "8")
-    ("DR" . "9")
-    ("DD" . "A")
-    ("DU" . "B")
-    ("UL" . "C")
-    ("UR" . "D")
-    ("UD" . "E")
-    ("UU" . "F")))
-
-(defun move-pair-to-hex (move-pair)
-  (cdr (assoc move-pair *hex-mapping* :test #'equalp)))
-
-(defun decode-game (encoding)
-  (apply #'concatenate
-         (cons 'string
-               (loop for c across encoding
-                     collect (car (rassoc (string c) *hex-mapping* :test #'equalp))))))
+                  collect (multiple-value-bind (next-state move-sequence)
+                              (advance searcher)
+                            (setf state next-state)
+                            (when process-fn
+                              (funcall process-fn next-state move-sequence))
+                            move-sequence))))
+      (values (score state)
+              (encode-game (apply #'append move-sequences))
+              state))))
 
 (defclass node ()
   ((parents
@@ -82,19 +38,35 @@ PROCESS-FN is called on each new state."
     :initarg :heuristic-value
     :initform nil
     :accessor heuristic-value)
-   (children
-    :initarg :children
+   (edges
+    :initarg :edges
     :initform nil
-    :reader children)
+    :reader edges
+    :documentation "Edges are pointers to child nodes paired with
+move sequences that are necessary to transition to that child node.")
    (expanded
     :initarg :expanded
     :initform nil
     :accessor expanded)))
 
-(defun (setf children) (child-nodes node)
-  (setf (slot-value node 'children) child-nodes)
+(defgeneric children (node))
+(defmethod children ((node node))
+  (mapcar #'edge-child (edges node)))
+
+(defun (setf edges) (edges node)
+  (setf (slot-value node 'edges) edges)
   ;; If we add children to a node, also mark it as expanded.
   (setf (expanded node) t))
+
+(defun make-edge (move-sequence child)
+  ;; For now, just go with a pair.
+  (cons move-sequence child))
+
+(defun edge-child (edge)
+  (cdr edge))
+
+(defun edge-move-sequence (edge)
+  (car edge))
 
 (defun count-nodes (node)
   "Count nodes in the tree rooted at the given node."
@@ -106,7 +78,7 @@ to the garbage collector that it can collect."
   (when (not (get-node keep-cache node))
     (loop for child in (children node)
           do (destroy-tree child keep-cache))
-    (setf (children node) nil)))
+    (setf (edges node) nil)))
 
 (defclass node-cache ()
   ((hashset
@@ -134,7 +106,7 @@ node object) exists already."))
   (state-hash (state node)))
 
 (defgeneric advance (tree-searcher)
-  (:documentation "Get tree searcher to advance and return the next state."))
+  (:documentation "Get tree searcher to advance and return the next state + move sequence."))
 
 ;;; Returns a heuristic function with the given
 ;;; weights on different characteristics of the
