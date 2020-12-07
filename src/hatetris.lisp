@@ -207,8 +207,8 @@
       (let ((locked-positions (list))
             (positions (queue:make-queue
                         :initial-contents (list (list piece initial-move-sequence)))))
-        (loop while (not (queue:queue-empty-p positions)) do
-              (let* ((position (queue:queue-pop positions))
+        (loop while (not (queue:empty-p positions)) do
+              (let* ((position (queue:qpop positions))
                      (piece (car position))
                      (move-sequence (cadr position)))
                 (when (lockable-p state piece)
@@ -221,9 +221,7 @@
                         (when (and (not (seen-p seen next-piece))
                                    (valid-position-p state next-piece))
                           (add-to-seen seen next-piece)
-                          (queue:queue-push
-                           (list next-piece (cons move-id move-sequence))
-                           positions))))))
+                          (queue:qpush positions (list next-piece (cons move-id move-sequence))))))))
         ;; I HATE the code in this function, need to refactor it.
         ;; If it helps to clarify for my future self, what I have referred
         ;; to as a "position" here is a list containing a piece and the move

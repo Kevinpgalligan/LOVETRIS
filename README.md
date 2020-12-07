@@ -5,7 +5,6 @@ An AI to play this Tetris variant: https://qntm.org/files/hatetris/hatetris.html
 trivial-gamekit package has manual installation steps, see: https://github.com/borodust/trivial-gamekit
 
 ### TODO
-* Write own queue implementation.
 * Make code thread-safe again.
 * Search tree stats: node depths, distribution of heuristic scores, average ply, number of nodes / space occupied. This can be used to inform what sorta search depth will be feasible.
 * Evolve parameters for brute force search, see how good it can get.
