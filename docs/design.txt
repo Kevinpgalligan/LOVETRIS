@@ -34,3 +34,28 @@ Evaluation took:
 
 10
 "AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAAA083AAAAAAA95DAAAAAAA576AAAAAAA5DAAAAAAA88AAAAAAAAA6AAAAAAA08AAAAAAAAAAAAAAAA80C8AAAAAAAA032AAAAAAA95EAAAAAA576AAAAAA95DAAAAAAA576AAAAAA95DAAAAAAA8EAAAAAA2EAAAAA808AAAAAA208AAAAA8222AAAAAA08AAAAA80FB2AAAAAA6AAAA95DAEAAAAA22AAA999DAEAAAA59AAAA822AAAAAAAAA99AAAA69AAAA6AAA02EAAAA56DAAAA088AAAA576AA95B6AAA03ECABAAA022AAA022AA8822AAA20AA96AA03ECAAA9AA8AA8A02EFAE80EAA65AA65A59A96A"
+
+### Back to parallel (Dec 7th, 2020)
+Fixed the replay bug, which turned out to be a bit more involved than I expected.
+
+Aaaand multi-threading is back. Next step is to tune the heuristics. I'm not sure if the score improvement was actually due to allowing multiple parents, or due to me changing the heuristic weights slightly.
+
+
+(time (run-searcher (lambda (state)
+                          (make-instance 'brute-searcher
+                                         :start-state state
+                                         :num-threads 4
+                                         :heuristic-eval (get-heuristic-eval -0.1 1.0 -0.4 -0.4)
+                                         :search-depth 4))))
+Evaluation took:
+  221.270 seconds of real time
+  589.210800 seconds of total run time (574.858972 user, 14.351828 system)
+  [ Run times consist of 40.367 seconds GC time, and 548.844 seconds non-GC time. ]
+  266.29% CPU
+  706,745,032,128 processor cycles
+  226,926,231,232 bytes consed
+  
+10
+"AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAAA083AAAAAAA95DAAAAAAAA96AAAAAA976AAAAAAA22AAAAAAAA9AAAAAAA822AAAAAAAAAAAAAAAA0322AAAAAAA80CAAAAAAAA57AAAAAA95DAAAAAAAA0EAAAAAAAAAAAAAA8EAAAAA95AAAAAAB7EEAAAAA808AAAAAAA6AAAAA8AAAAAA08AAAAA80FB2AAAAAA6AAAA95DAEAAAAA22AAAABAAAA966AAAA08AAAAAAAAAA66AAAA3AAA9AAA80BAAAA95B6AAA8222AAA95DAAAA5EAA88AAA808AAA95AAA96AA882AABBAA03ECAAA9AA8AA8A02EFAE80EAA65AA65A9BA5A"
+#<STATE {1005F7D563}>
+LOVETRIS> 

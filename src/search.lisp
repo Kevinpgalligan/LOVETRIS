@@ -102,6 +102,16 @@ node object) exists already."))
 (defmethod get-node ((cache node-cache) node)
   (gethash node (hashset cache)))
 
+(defun make-node-cache (node)
+  (let ((cache (make-instance 'node-cache)))
+    (populate-cache cache node)
+    cache))
+
+(defun populate-cache (cache node)
+  (add cache node)
+  (loop for child in (children node) do
+        (populate-cache cache child)))
+
 (defun node-hash (node)
   (state-hash (state node)))
 

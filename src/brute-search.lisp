@@ -29,7 +29,7 @@
   (expand-nodes! (list (search-tree searcher))
                  (search-depth searcher)
                  (num-threads searcher)
-                 (create-node-cache (search-tree searcher)))
+                 (make-node-cache (search-tree searcher)))
   (propagate-heuristic-values! (search-tree searcher) (heuristic-eval searcher))
   (let* ((next-edge
            (alexandria:extremum (edges (search-tree searcher))
@@ -37,7 +37,7 @@
                                 :key (lambda (edge)
                                        (heuristic-value (edge-child edge)))))
          (next-node (edge-child next-edge)))
-    (let ((keep-cache (create-node-cache next-node)))
+    (let ((keep-cache (make-node-cache next-node)))
       (loop for node in (children (search-tree searcher)) do
             ;; This should help SBCL to perform garbage collection
             ;; properly. In large data structures, such as trees, SBCL's
@@ -50,15 +50,6 @@
     (setf (search-tree searcher) next-node)
     (values (state next-node) (edge-move-sequence next-edge))))
 
-(defun create-node-cache (node)
-  (let ((cache (make-instance 'node-cache)))
-    (populate-cache cache node)
-    cache))
-
-(defun populate-cache (cache node)
-  (add cache node)
-  (loop for child in (children node) do
-        (populate-cache cache child)))
 
 (defun expand-nodes! (nodes remaining-depth num-threads node-cache)
   (when (> remaining-depth 0)
@@ -81,7 +72,8 @@
                        node-cache)))))
 
 (defun expand-with-threads (nodes remaining-depth num-threads node-cache)
-  (let ((nodes-lock (bt:make-lock)))
+  (let ((nodes-lock (bt:make-lock))
+        (append-parent-lock (bt:make-lock)))
     (let ((threads
             (loop for i below num-threads collect
                   (bt:make-thread
@@ -91,38 +83,43 @@
                                      (pop nodes))))
                              (if (null node)
                                  (return)
-                                 (add-leaves! node remaining-depth node-cache)))))))))
+                                 (add-leaves! node remaining-depth node-cache append-parent-lock)))))))))
       ;; Now wait for the threads to terminate.
       (loop for thread in threads do
             (bt:join-thread thread)))))
 
-(defun generate-children! (node node-cache)
+(defun generate-children! (node node-cache &optional append-parent-lock)
   (setf (edges node)
         (loop for placement in (possible-placements (state node))
               for child = (make-instance 'node
                                          :state (state placement)
                                          :parents (list node))
               for existing = (get-node node-cache child)
+              ;; There is a race condition here. Threads A & B both
+              ;; check the cache for node N, it's not there. Then they
+              ;; both add it to their respective branches of the tree, and
+              ;; to the node cache. But we're accepting that risk in exchange
+              ;; for simplicity of implementation. It's not the end of the world
+              ;; if we explore a branch of the search tree needlessly due to
+              ;; a failure of the cache.
               do (if existing
-                     ;; TODO make this thread-safe.
-                     ;; There is a race condition here. Threads A & B both
-                     ;; check the cache for node N, it's not there. Then they
-                     ;; both add it to their respective branches of the tree, and
-                     ;; to the node cache. But we're accepting that risk in exchange
-                     ;; for simplicity of implementation. It's not the end of the world
-                     ;; if we explore a branch of the search tree needlessly due to
-                     ;; a failure of the cache.
-                     (setf (parents existing) (cons node (parents existing)))
+                     (flet ((append-parent ()
+                              (setf (parents existing) (cons node (parents existing)))))
+                       (if append-parent-lock
+                           ;; If it's super common for nodes to have multiple
+                           ;; parents, then this might become a bottleneck.
+                           (bt:with-lock-held (append-parent-lock) (append-parent))
+                           (append-parent)))
                      (add node-cache child))
               collect (make-edge (move-sequence placement)
                                  (or existing child)))))
 
-(defun add-leaves! (node remaining-depth node-cache)
+(defun add-leaves! (node remaining-depth node-cache &optional append-parent-lock)
   (when (< 0 remaining-depth)
     (when (not (expanded node))
-      (generate-children! node node-cache))
+      (generate-children! node node-cache append-parent-lock))
     (loop for child in (children node) do
-          (add-leaves! child (1- remaining-depth) node-cache))))
+          (add-leaves! child (1- remaining-depth) node-cache append-parent-lock))))
 
 (defun propagate-heuristic-values! (node heuristic-eval)
   ;; Due to nodes having multiple parents, this
