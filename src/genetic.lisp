@@ -12,7 +12,7 @@
 (defpackage :genetic
   (:use :cl)
   (:export
-   #:evolve-random
+   #:random-pop
    #:evolve
    
    ;; Used with population.
@@ -25,7 +25,6 @@
    #:genotype
    #:fitness
 
-   #:eval-fitness
    #:crossover
    #:mutate))
 
@@ -33,8 +32,6 @@
 
 ;;; Genotype class must be implemented with definitions
 ;;; of these methods.
-(defgeneric eval-fitness (genotype)
-  (:documentation "Returns fitness score of genotype."))
 (defgeneric crossover (genotype1 genotype2)
   (:documentation "Combines 2 genotypes to make a new one."))
 (defgeneric mutate (genotype)
@@ -72,73 +69,37 @@
                 (list (mapcar #'fitness solutions)))))
 
 (defun best-solution (population)
-  (alexandria:extremum (solutions population)
-                       #'>
-                       :key #'fitness))
+  (alexandria:extremum (solutions population) #'> :key #'fitness))
 
 (defun update-solutions! (population new-solutions)
   (setf (solutions population) new-solutions)
   (add-to-fitness-history population new-solutions))
 
-(defun evolve-random (random-genotype
-                      &key
-                        (pop-size 100)
-                        rounds
-                        operations
-                        log)
-  "Evolve solutions starting from a random population.
+(defun random-pop (random-genotype pop-size eval-fitness)
+  (make-instance 'population
+                 :solutions (mapcar
+                             (lambda (genotype)
+                               (make-instance 'solution
+                                              :genotype genotype
+                                              :fitness (funcall eval-fitness genotype)))
+                             (loop repeat pop-size
+                                   collect (funcall random-genotype)))))
 
-=== Parameters ===
-RANDOM-GENOTYPE: a function that returns a random genotype.
-POP-SIZE: how many solutions to keep in the population.
-ROUNDS: how many rounds of evolution to run, see #'evolve for default.
-OPERATIONS: proportion of new population to form using each operation type.
-            See #'evolve for default.
-LOG: whether to log progress (t or nil).
-
-=== Returns ===
-The evolved population."
-  (evolve (make-instance
-           'population
-           :solutions (mapcar
-                       (lambda (genotype)
-                         (make-instance 'solution
-                                        :genotype genotype
-                                        :fitness (eval-fitness genotype)))
-                       (loop for i below pop-size collect
-                             (funcall random-genotype))))
-          :rounds rounds
-          :operations operations
-          :log log))
-
-(defun evolve (population &key rounds operations log)
-  "Evolve POPULATION for ROUNDS rounds using operations proportionally
-to the weights defined in OPERATIONS.
-
-=== Parameters ===
-POPULATION: speaks for itself.
-ROUNDS: number of rounds, default is 5.
-OPERATIONS: default is ((crossover 70) (mutation 20) (elitism 10)).
-LOG: whether to log progress (t or nil).
-
-=== Returns ===
-The evolved population."
-  (when (null rounds)
-    (setf rounds 5))
-  (when (null operations)
-    (setf operations '((crossover 70)
-                       (mutation 20)
-                       (elitism 10))))
+(defun evolve (population
+               eval-fitness
+               &key
+                 (rounds 5)
+                 (operations '((:crossover 70)
+                               (:mutation 20)
+                               (:elitism 10)))
+                 (log t))
+  (assert eval-fitness)
   (dotimes (i rounds population)
     (when log
-      (format t
-              "Round #~a, best solution fitness ~a~%"
-              i
-              (fitness (best-solution population))))
-    (evolve-solutions! population
-                       operations)))
+      (format t "Round #~a, best solution fitness ~a~%" i (fitness (best-solution population))))
+    (evolve-solutions! population eval-fitness operations)))
 
-(defun evolve-solutions! (population operations)
+(defun evolve-solutions! (population eval-fitness operations)
   "Creates new solutions based on genetic operations and overwrites the old ones
 in POPULATION."
   (let ((n (size population))
@@ -155,26 +116,26 @@ in POPULATION."
                                        n
                                        (floor (* n (/ proportion total-prop))))))
                             (decf n m)
-                            (create-solutions op m population)))))))
+                            (create-solutions op m population eval-fitness)))))))
 
-(defun create-solutions (op m population)
+(defun create-solutions (op m population eval-fitness)
   "Create M new solutions based on POPULATION using the operation OP."
   (cond
-    ((eq op 'mutation)
+    ((eq op :mutation)
      (loop repeat m collect
            (let ((genotype (mutate (genotype (select-solution population)))))
              (make-instance 'solution
                             :genotype genotype
-                            :fitness (eval-fitness genotype)))))
-    ((eq op 'crossover)
+                            :fitness (funcall eval-fitness genotype)))))
+    ((eq op :crossover)
      (loop repeat m collect
            (let ((genotype
                    (crossover (genotype (select-solution population))
                               (genotype (select-solution population)))))
              (make-instance 'solution
                             :genotype genotype
-                            :fitness (eval-fitness genotype)))))
-    ((eq op 'elitism)
+                            :fitness (funcall eval-fitness genotype)))))
+    ((eq op :elitism)
      (subseq (sort (solutions population)
                    #'>
                    :key #'fitness)

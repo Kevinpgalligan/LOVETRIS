@@ -19,4 +19,6 @@
                (:file "brute-search")
                (:file "play")
                (:file "genetic")
-               (:file "train")))
+               (:file "genetic-example")
+;               (:file "train")
+               ))
