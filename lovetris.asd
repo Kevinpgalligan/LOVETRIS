@@ -8,8 +8,7 @@
   :author "Kevin Galligan"
   :depends-on (:alexandria
                :trivial-gamekit
-               :bordeaux-threads
-               :vgplot)
+               :bordeaux-threads)
   :pathname "src"
   :serial t
   :components ((:file "package")
@@ -20,5 +19,4 @@
                (:file "play")
                (:file "genetic")
                (:file "genetic-example")
-;               (:file "train")
-               ))
+               (:file "train")))

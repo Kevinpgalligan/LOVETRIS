@@ -59,6 +59,17 @@
     :initform nil
     :accessor fitness-history)))
 
+#|
+(defun serialize-population (pop filename)
+  "If you wanna call this function, you have to implement
+the SERIALIZE-GENOTYPE method."
+  (let ((history-size (length (fitness-history pop))))
+    (with-open-file (f filename
+                       :direction :output
+                       :if-exists :supersede)
+      (format f "~a ~a~%"))))
+|#
+
 (defmethod initialize-instance :after ((population population) &key)
   (add-to-fitness-history population (solutions population))
   (setf (slot-value population 'size) (length (solutions population))))
