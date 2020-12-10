@@ -8,6 +8,13 @@
     :initarg :heuristic-params
     :reader heuristic-params)))
 
+(defmethod print-object ((search-genotype search-genotype) stream)
+  (prin1 (heuristic-params search-genotype) stream))
+
+(defun parse-search-genotype (params)
+  (make-instance 'search-genotype
+                 :heuristic-params params))
+
 (defmethod genetic:crossover ((geno1 search-genotype)
                               (geno2 search-genotype))
   (make-instance 'search-genotype

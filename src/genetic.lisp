@@ -14,6 +14,8 @@
   (:export
    #:random-pop
    #:evolve
+   #:serialize-population
+   #:deserialize-population
    
    ;; Used with population.
    #:best-solution
@@ -56,23 +58,44 @@
    (size
     :reader size)
    (fitness-history
-    :initform nil
+    :initarg :fitness-history
+    :initform (error "Must provide fitness history.")
     :accessor fitness-history)))
 
-#|
+(defmethod initialize-instance :after ((population population) &key)
+  (setf (slot-value population 'size) (length (solutions population))))
+
 (defun serialize-population (pop filename)
   "If you wanna call this function, you have to implement
-the SERIALIZE-GENOTYPE method."
-  (let ((history-size (length (fitness-history pop))))
-    (with-open-file (f filename
-                       :direction :output
-                       :if-exists :supersede)
-      (format f "~a ~a~%"))))
-|#
+PRINT-OBJECT for your genotype."
+  (with-open-file (f filename
+                     :direction :output
+                     :if-exists :supersede)
+    (with-standard-io-syntax
+      (print pop f))))
 
-(defmethod initialize-instance :after ((population population) &key)
-  (add-to-fitness-history population (solutions population))
-  (setf (slot-value population 'size) (length (solutions population))))
+(defun deserialize-population (filename parse-genotype)
+  (with-open-file (f filename
+                     :direction :input)
+    (with-standard-io-syntax
+      (let ((raw (read f)))
+        (flet ((parse-solution (s)
+                 (make-instance 'solution
+                                :genotype (funcall parse-genotype (getf s :genotype))
+                                :fitness (getf s :fitness))))
+          (make-instance 'population
+                         :fitness-history (getf raw :fitness-history)
+                         :solutions (mapcar #'parse-solution (getf raw :solutions))))))))
+
+(defmethod print-object ((population population) stream)
+  (prin1 `(:solutions ,(solutions population)
+           :fitness-history ,(fitness-history population))
+         stream))
+
+(defmethod print-object ((solution solution) stream)
+  (print `(:genotype ,(genotype solution)
+           :fitness ,(fitness solution))
+         stream))
 
 (defun add-to-fitness-history (population solutions)
   (setf (fitness-history population)
@@ -87,14 +110,15 @@ the SERIALIZE-GENOTYPE method."
   (add-to-fitness-history population new-solutions))
 
 (defun random-pop (random-genotype pop-size eval-fitness)
-  (make-instance 'population
-                 :solutions (mapcar
-                             (lambda (genotype)
-                               (make-instance 'solution
-                                              :genotype genotype
-                                              :fitness (funcall eval-fitness genotype)))
-                             (loop repeat pop-size
-                                   collect (funcall random-genotype)))))
+  (let ((solutions
+          (loop repeat pop-size
+                collect (let ((genotype (funcall random-genotype)))
+                          (make-instance 'solution
+                                         :genotype genotype
+                                         :fitness (funcall eval-fitness genotype))))))
+    (make-instance 'population
+                   :solutions solutions
+                   :fitness-history (mapcar #'fitness solutions))))
 
 (defun evolve (population
                eval-fitness

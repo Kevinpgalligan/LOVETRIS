@@ -1,5 +1,5 @@
 ### Description
-An AI to play this Tetris variant: https://qntm.org/files/hatetris/hatetris.html
+An AI that plays this variant of Tetris: <https://qntm.org/hatetris>
 
 ### Setup
 trivial-gamekit package has manual installation steps, see: https://github.com/borodust/trivial-gamekit

@@ -59,3 +59,12 @@ Evaluation took:
 "AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAAA083AAAAAAA95DAAAAAAAA96AAAAAA976AAAAAAA22AAAAAAAA9AAAAAAA822AAAAAAAAAAAAAAAA0322AAAAAAA80CAAAAAAAA57AAAAAA95DAAAAAAAA0EAAAAAAAAAAAAAA8EAAAAA95AAAAAAB7EEAAAAA808AAAAAAA6AAAAA8AAAAAA08AAAAA80FB2AAAAAA6AAAA95DAEAAAAA22AAAABAAAA966AAAA08AAAAAAAAAA66AAAA3AAA9AAA80BAAAA95B6AAA8222AAA95DAAAA5EAA88AAA808AAA95AAA96AA882AABBAA03ECAAA9AA8AA8A02EFAE80EAA65AA65A9BA5A"
 #<STATE {1005F7D563}>
 LOVETRIS> 
+
+
+### Evolution has begun (December 9th 2020)
+I've started the process of tuning the heuristics. It'll take a long time; 1 game takes about ~10 minutes to play out with a search depth of 4. Here, we have to evaluate 50 sets of heuristics, so that's 500 minutes, or nearly 10 hours. What the hay, I'll leave it overnight and see what happens. No actual genetic operations have been applied yet, these are just random heuristic weights.
+
+LOVETRIS> (defparameter searcher-eval (make-searcher-eval 4 4 +max-states+))
+LOVETRIS> (defparameter starting-pop (random-searcher-pop 50 searcher-eval))
+
+I can do a few rounds of evolution and see what happens. As seen above, it's possible to clear at least 10 rows with a search depth of 4. The next question is what search depth to use for the actual "world record attempt", which will be limited by time and by space. Assuming a ply (?) of about 14, it should be possible to search to a depth of 5 (14^5 = 537,824). Possibly even 6 or 7.
