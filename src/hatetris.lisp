@@ -19,9 +19,6 @@
    (score
     :initarg :score
     :accessor score)
-   (bar
-    :initarg :bar
-    :reader bar)
    (game-over
     :initarg :game-over
     :accessor game-over)))
@@ -41,8 +38,13 @@
                                    :element-type `(unsigned-byte ,+well-width+)
                                    :initial-element 0)
                  :score 0
-                 :bar +bar+
                  :game-over nil))
+
+(defun bar (state)
+  ;; Another thing that I tried to make general but
+  ;; am now hard-coding.
+  (declare (ignore state))
+  +bar+)
 
 (defun full-square-p (state x y)
   (< 0 (logand (ash 1 x) (aref (well state) y))))
@@ -101,7 +103,6 @@
   (make-instance 'state
                  :well (alexandria:copy-array (well state))
                  :score (score state)
-                 :bar (bar state)
                  :game-over (game-over state)))
 
 (defun tower-above-bar (state)

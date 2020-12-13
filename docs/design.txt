@@ -68,3 +68,110 @@ LOVETRIS> (defparameter searcher-eval (make-searcher-eval 4 4 +max-states+))
 LOVETRIS> (defparameter starting-pop (random-searcher-pop 50 searcher-eval))
 
 I can do a few rounds of evolution and see what happens. As seen above, it's possible to clear at least 10 rows with a search depth of 4. The next question is what search depth to use for the actual "world record attempt", which will be limited by time and by space. Assuming a ply (?) of about 14, it should be possible to search to a depth of 5 (14^5 = 537,824). Possibly even 6 or 7.
+
+For future reference, here's how to evolve the population and serialise it.
+
+LOVETRIS> (genetic:evolve starting-pop searcher-eval :rounds 2)
+LOVETRIS> (genetic:serialize-population starting-pop "/home/kevingal/proyectos/Lovetris/params/gen3")
+LOVETRIS> (defparameter depop (genetic:deserialize-population "/tmp/searchpop" #'parse-search-genotype))
+
+This has gotten us up to a score of 12 lines. There doesn't seem to be as much diversity in the population anymore. In particular, the 2 individuals that score 12 are quite similar. I suppose that's because one is a mutation of the other.
+
+(:GENOTYPE (-0.51763654 0.522622 -0.2563348 -0.6270655) :FITNESS 12)  
+(:GENOTYPE (-0.51307577 0.59401876 -0.25150645 -0.5662503) :FITNESS 12)
+
+I might run 1 more round of evolution. Other stuff: profile (I've possibly introduced low-hanging fruit optimisations), stats about search tree, extrapolate to deeper search & how deep we can afford to go. Then we should be ready to make the Big Brute-Force Attempt. Beyond that: use human records as a springboard & MCTS.
+
+Here's the 12-point game, by the way. At some points, the strategy appears similar to human efforts. Q: should there be a penalty for the game ending? Discourage the AI from giving up.
+
+AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAAA083AAAAAAA95DAAAAAAAA96AAAAAA976AAAAAAA22AAAAAAAA9AAAAAAA822AAAAAAA95AAAAAAAEEAAAAAAA56AAAAAA2A6AAAAAAEAAAAA3AAAAAA08AA2AAAAAA08AAAAAAA8228AAAAAA969AAAAAA5AAAAAA9AAAAA576AAAAA88AAAAAAAAAA8888BAAAAA222AAAAA80FB2AAAAA95DAAAAAA883AAAAA97AAAAAA2AAAAA95DAAAAAA030AAAAAA6AAAAA5AAAA88BBEEAAAA88AAAAA95AAAA8A56AAAA20AAAAA803AAAAA0AAAA996AAA803AAAABAAAA65AAAA6AAAA0AAAA02AAA00AAAA55AA802AAA5AA8AA803A
+
+Okayyyy, I tried that (-100 penalty if the game is over). And... same outcome.
+
+### Back to the drawing board (December 11th, 2020)
+I've realised that there have been some issues in the code.
+
+Firstly, the reason the speedup was so dramatic when we added node caching was that we were
+cutting certain nodes out of the search tree when they shouldn't have been. A->B was already
+in the tree; we exclude C->B; and then, when we end up moving to C, B never gets explored.
+
+I fixed this by allowing nodes to have multiple parents, turning our search tree into a
+search DAG. The first problem with DAGs is that you need a cache to track your traversal, to
+ensure that you don't visit the same node multiple times (well, I guess it's okay, it's
+just inefficient). The second problem is that it makes multithreading more complicated.
+
+So I transitioned to DAGs without fully thinking through the consequences. There are a few
+possibilities:
+
+1) Muddle through the current DAG shit, super complex code.
+2) Roll back to trees, each thread operates completely independently (no locks, yay). But
+   may result in hitting memory limits (not so yay).
+3) Go single-threaded. Still requires fairly complicated caching: a cache to store all
+   the nodes in the DAG (avoid duplicates when we're generating new nodes), and a cache
+   to track our traversal of the DAG (avoid visiting the same node twice).
+4) Switch up threading model. Single-threaded traversal of DAG, but certain thread-safe tasks
+   (generate the children of this node! evaluate this node's heuristic value!) are passed to
+   a thread pool. Or some alternative.
+
+Some maths may help to resolve the dilemma. Consider option #2. Say that the average move has
+a ply of 17. A depth of 6 then results in over 20 million nodes. Given 15GB, that's like...
+750 bytes per node. WELL, I'm not sure, but I think it's feasible. Depending on how much
+overhead is required, which I'm not exactly qualified to calculate. But 6 would be the limit.
+
+If caching reduces the average ply to 12.8 (12.8^4 = 27,000)... then 6 layers would require
+4 million nodes. 7 layers would still require 56 million nodes - unlikely to fit in memory,
+especially with the extra overhead introduced by caching. Oh, I don't know anymore.
+
+Interestingly... 20 million / 4 threads = 5 million. So single-threaded DAG might outperform
+multithreaded tree. FURTHER CONSIDERATION NEEDED BEFORE I MAKE A CALL.
+
+### DAG days ahead (December 12th, 2020)
+After letting the idea sit in my head for a while, I've decided to go with the single-threaded
+DAG approach. If it turns out to be too slow, I can always add multi-threading later. But,
+that's unlikely to be the case. Multithreading gives a roughly 2x difference in speed, which isn't huuuuge.
+
+So, I've now gotta rip out the threading stuff. And implement traversal caching.
+
+Addendum: this graph traversal shindig is turning out to be quite cool. I'm implementing some
+abstract functions that will be building blocks for brute force search (pre-order and post-order
+DAG traversal). I need so many different applications (expanding, destroying, propagating
+heuristics, gathering stats) that the end result will likely be muy muy general.
+
+### Code complete (December 13th, 2020)
+I've completed the refactoring. Pretty happy with the code now, it has shrunk a bit. On the
+other hand, I suspect that it'll be quite a bit slower. Possibly a big performance hog: calculating
+hash of states, over and over again. Might need to save that value in the node. Wellllll, let's see.
+I'm currently waiting for some performance profiling to finish.
+
+NEXT: optimise, if necessary. Calculate stats about search tree, use it to gauge feasible search depth.
+Run another round or two of evolution.
+
+Whew, 126 seconds to do 10 states. I guess, in the past, it was taking 500 seconds to play a full game in
+single-threaded mode.
+
+LOVETRIS> (time
+           (flamegraph:save-flame-graph ("/home/kevingal/proyectos/Lovetris/profiling/search.stack")
+             (run-searcher (lambda (state)
+                             (make-instance 'brute-searcher
+                                            :search-depth 4
+                                            :heuristic-eval (make-heuristic-eval -0.51307577 0.59401876 -0.25150645 -0.5662503)
+                                            :start-state state))
+                           :max-states 10)))
+Profiler sample vector full (11,891 traces / approximately 499,999 samples), doubling the size
+Evaluation took:
+  126.168 seconds of real time
+  126.224706 seconds of total run time (124.597570 user, 1.627136 system)
+  [ Run times consist of 7.627 seconds GC time, and 118.598 seconds non-GC time. ]
+  100.05% CPU
+  422,869 forms interpreted
+  36 lambdas converted
+  402,983,007,904 processor cycles
+  63,144,478,512 bytes consed
+  
+2
+"AAAAAAAA95AAAAAAAAA6AAAAAAAA2AAAAAAAA083AAAAAAA95DAAAAAAAA96AAAAAA976AAAAAAA22AAAAAAAA9AAAAAAA822A"
+#<STATE {10079D6E83}>
+
+FOR REFERENCE, here's the command to generate the flamegraph SVG:
+
+~/proyectos/FlameGraph$ ./flamegraph.pl ../Lovetris/profiling/search.stack >../Lovetris/profiling/profile-6.svg

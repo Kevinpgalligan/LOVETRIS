@@ -129,10 +129,12 @@ PRINT-OBJECT for your genotype."
                                (:elitism 10)))
                  (log t))
   (assert eval-fitness)
+  (when log
+    (format t "Initial best fitness: ~a~%" (fitness (best-solution population))))
   (dotimes (i rounds population)
+    (evolve-solutions! population eval-fitness operations)
     (when log
-      (format t "Round #~a, best solution fitness ~a~%" i (fitness (best-solution population))))
-    (evolve-solutions! population eval-fitness operations)))
+      (format t "Round #~a, best solution fitness ~a~%" (1+ i) (fitness (best-solution population))))))
 
 (defun evolve-solutions! (population eval-fitness operations)
   "Creates new solutions based on genetic operations and overwrites the old ones

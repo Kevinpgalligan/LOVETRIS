@@ -43,16 +43,15 @@
     (loop for x in params collect
           (/ x dist))))
 
-(defun make-searcher-eval (&key (search-depth 4) (num-threads 4) (max-states +max-states+))
+(defun make-searcher-eval (&key (search-depth 4) (max-states +max-states+))
   (lambda (genotype)
     (run-searcher
      (lambda (state)
        (make-instance 'brute-searcher
                       :search-depth search-depth
-                      :heuristic-eval (apply #'get-heuristic-eval
+                      :heuristic-eval (apply #'make-heuristic-eval
                                              (heuristic-params genotype))
-                      :start-state state
-                      :num-threads num-threads))
+                      :start-state state))
      :max-states max-states)))
 
 (defun random-searcher-pop (pop-size eval-fn)

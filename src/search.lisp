@@ -25,6 +25,9 @@ PROCESS-FN is called on each new state and move sequence."
               (encode-game (apply #'append move-sequences))
               state))))
 
+(defgeneric advance (tree-searcher)
+  (:documentation "Get tree searcher to advance and return the next state + move sequence."))
+
 (defclass node ()
   ((parents
     :initarg :parents
@@ -49,6 +52,21 @@ move sequences that are necessary to transition to that child node.")
     :initform nil
     :accessor expanded)))
 
+(defun traverse-dag (node f &key (order :pre) max-depth)
+  (assert (member order '(:pre :post)))
+  (let ((traversal-cache (make-node-cache)))
+    (labels ((traverse-aux (node depth)
+               (when (not (get-node traversal-cache node))
+                 (add traversal-cache node)
+                 (when (eq order :pre)
+                   (funcall f node))
+                 (when (or (not max-depth) (< depth max-depth))
+                   (loop for edge in (edges node)
+                         do (traverse-aux (edge-child edge) (1+ depth))))
+                 (when (eq order :post)
+                   (funcall f node)))))
+      (traverse-aux node 0))))
+
 (defgeneric children (node))
 (defmethod children ((node node))
   (mapcar #'edge-child (edges node)))
@@ -67,18 +85,6 @@ move sequences that are necessary to transition to that child node.")
 
 (defun edge-move-sequence (edge)
   (car edge))
-
-(defun count-nodes (node)
-  "Count nodes in the tree rooted at the given node."
-  (+ 1 (apply #'+ (mapcar #'count-nodes (children node)))))
-
-(defun destroy-tree (node keep-cache)
-  "Attempts to break references between nodes in the given tree, as a hint
-to the garbage collector that it can collect."
-  (when (not (get-node keep-cache node))
-    (loop for child in (children node)
-          do (destroy-tree child keep-cache))
-    (setf (edges node) nil)))
 
 (defclass node-cache ()
   ((hashset
@@ -102,26 +108,34 @@ node object) exists already."))
 (defmethod get-node ((cache node-cache) node)
   (gethash node (hashset cache)))
 
-(defun make-node-cache (node)
+(defun make-node-cache (&optional node)
   (let ((cache (make-instance 'node-cache)))
-    (populate-cache cache node)
+    (when node
+      (populate-cache cache node))
     cache))
 
-(defun populate-cache (cache node)
-  (add cache node)
-  (loop for child in (children node) do
-        (populate-cache cache child)))
+(defun populate-cache (cache root)
+  (traverse-dag root
+                (lambda (node)
+                  (add cache node))))
 
 (defun node-hash (node)
   (state-hash (state node)))
 
-(defgeneric advance (tree-searcher)
-  (:documentation "Get tree searcher to advance and return the next state + move sequence."))
+(defun destroy-tree (root keep-cache)
+  "Attempts to break references between nodes in the given tree, as a hint
+to the garbage collector that it can collect."
+  (traverse-dag root
+                (lambda (node)
+                  (when (not (get-node keep-cache node))
+                    (setf (edges node) nil)
+                    (setf (parents node) nil)))
+                :order :post))
 
 ;;; Returns a heuristic function with the given
 ;;; weights on different characteristics of the
 ;;; game.
-(defun get-heuristic-eval (w-aggregate-height w-score w-holes w-bumpiness)
+(defun make-heuristic-eval (w-aggregate-height w-score w-holes w-bumpiness)
   (lambda (state)
     (+ (* w-aggregate-height (aggregate-height state))
        (* w-score (score state))
