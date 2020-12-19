@@ -7,8 +7,7 @@
   :license "MIT"
   :author "Kevin Galligan"
   :depends-on (:alexandria
-               :trivial-gamekit
-               :bordeaux-threads)
+               :trivial-gamekit)
   :pathname "src"
   :serial t
   :components ((:file "package")

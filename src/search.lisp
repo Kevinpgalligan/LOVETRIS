@@ -2,7 +2,7 @@
 
 (in-package lovetris)
 
-(defun run-searcher (searcher-init &key max-states initial-state process-fn)
+(defun run-searcher (searcher-init &key max-states initial-state process-fn log)
   "Returns final score, a hex-encoded sequence of moves, and the final state.
 SEARCHER-INIT is a function that accepts the initial hatetris
 state and returns a searcher (which implements the ADVANCE
@@ -18,6 +18,9 @@ PROCESS-FN is called on each new state and move sequence."
                   collect (multiple-value-bind (next-state move-sequence)
                               (advance searcher)
                             (setf state next-state)
+                            (when log
+                              (format t "Round ~a~%" (1+ i))
+                              (display-state state))
                             (when process-fn
                               (funcall process-fn next-state move-sequence))
                             move-sequence))))
@@ -89,9 +92,7 @@ move sequences that are necessary to transition to that child node.")
 (defclass node-cache ()
   ((hashset
     :initform (make-hash-table :hash-function #'node-hash
-                               :test #'nodes-equivalent-p
-                               ;; Will be accessed by multiple threads, so...
-                               :synchronized t)
+                               :test #'nodes-equivalent-p)
     :reader hashset)))
 
 (defun nodes-equivalent-p (n1 n2)

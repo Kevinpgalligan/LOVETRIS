@@ -175,3 +175,44 @@ Evaluation took:
 FOR REFERENCE, here's the command to generate the flamegraph SVG:
 
 ~/proyectos/FlameGraph$ ./flamegraph.pl ../Lovetris/profiling/search.stack >../Lovetris/profiling/profile-6.svg
+
+Okayyyy, the hashing doesn't actually take up that much compute time. I mean, I can't see it in the profile, but it almost certainly takes up less time than finding piece placements (40%). Should be okay for now.
+
+Estimating average ply (it's a once-off thing, so kinda ugly):
+
+          (let ((d 4)
+                (max-ply 0)
+                (ply-sum 0)
+                (plies 0)
+                (state (make-state)))
+            (loop while (not (game-over state))
+                  for i from 0 below 3
+                  do (let ((searcher
+                             (make-instance 'brute-searcher
+                                            :start-state state
+                                            :heuristic-eval (make-heuristic-eval -0.51307577 0.59401876 -0.25150645 -0.5662503)
+                                            :search-depth d)))
+                       (expand-tree! searcher)
+                       (let ((count 0))
+                         (traverse-dag (root-node searcher)
+                                       (lambda (node) (incf count)))
+                         (let ((ply (expt count (/ 1 d))))
+                           (setf max-ply (max max-ply ply))
+                           (incf ply-sum ply)
+                           (incf plies)))
+                       (loop for i from 1 upto d
+                             while (not (game-over state))
+                             do (setf state (advance searcher)))))
+            (list max-ply (/ ply-sum plies)))
+
+Result: (15.839206 14.589107)
+
+Okayyyy, so the average ply is roughly 14.6. A bit higher than I was hoping.
+
+That's already 660k nodes when the search depth is 5. 9 million when the
+search depth is 6. It's crazy how fast exponential growth is...
+
+### Disappointment! (December 19th, 2020)
+Ran brute-force search with optimised heuristics & a search depth of 5 (the maximum it can manage, memory-wise) and only scored 10 points! Disappointing. Seems like increasing the search depth doesn't automatically improve quality, like Peter Norvig said. I'm not inclined to invest effort in using the 31-point human high score as a "springboard". The AI can't get a particularly impressive score by itself, so it's unlikely to improve. Need to consider whether it's worth continuing the project.
+
+AAAAAAAA95AAAAAAAAA6AAAAAAAA00EAAAAAAA95AAAAAAAA6AAAAAAAAAAAAA88BA79AAAAAA88BBEEAAAAAA95AAAAAAA8883AAAAAAA56AAAAAA030AAAAAA88C2AAAAAA296AAAAA8FB2AEAAAAAAEAAAAA966AAAAAA03AAAAAAAA0BAAAAAAAAAAAAA66AAAAA80A2AAAAA0BAAAAA80AAAAA95AAAAAA9AAAAAAAAAAD65BAAAAA56AAAA880EAAAA00EAAAA88EAAA00EAAAA0EAAA576AAA0EAAAA5AA803AAAABAAAA6AAAA56AAAEFBAAA95AAAAAAA56AA296AA0BAAABA822A3A82EBEEABA

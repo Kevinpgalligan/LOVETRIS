@@ -1,13 +1,4 @@
 ;;;; Optimisation by genetic algorithm.
-;;;;
-;;;; What must be defined to use it:
-;;;;  - a genotype class, implementing the methods below.
-;;;;  - a no-args function that returns a random genotype.
-;;;;
-;;;; By genotype, I mean the properties of a solution.
-;;;; For example, in a solution to maximize the fit of a
-;;;; quadratic equation to some datapoints, the genotype would
-;;;; be the coefficients of the equation.
 
 (defpackage :genetic
   (:use :cl)
